@@ -20,6 +20,7 @@ class AgentChunkType(str, Enum):
     TOOL_CALL = "tool_call"  # Tool 调用
     TOOL_RESULT = "tool_result"  # Tool 执行结果
     VISION = "vision"  # 图片分析结果
+    APPROVAL = "approval"  # 审批请求（HITL，等待用户决策）
     ERROR = "error"  # 错误信息
     DONE = "done"  # 完成信号
 
@@ -78,9 +79,11 @@ class ToolResult(BaseModel):
         data: 成功时的数据
         error: 错误信息
         error_code: 结构化错误码（TIMEOUT / TOOL_ERROR / VALIDATION_ERROR /
-            AUTH_ERROR / NOT_FOUND / RATE_LIMITED / UNKNOWN）
+            AUTH_ERROR / NOT_FOUND / RATE_LIMITED / PERMISSION_DENIED /
+            APPROVAL_PENDING / APPROVAL_DENIED / APPROVAL_TIMEOUT / UNKNOWN）
         retryable: 该错误是否可通过重试恢复（Agent 自主决策恢复路径的依据）
         suggestion: 给 Agent 的恢复建议（如 "稍后重试" / "改用其他工具"）
+        approval_id: 审批请求 ID（error_code=APPROVAL_PENDING 时携带）
     """
 
     success: bool
@@ -89,6 +92,7 @@ class ToolResult(BaseModel):
     error_code: str | None = None
     retryable: bool = False
     suggestion: str | None = None
+    approval_id: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -98,6 +102,7 @@ class ToolResult(BaseModel):
             "error_code": self.error_code,
             "retryable": self.retryable,
             "suggestion": self.suggestion,
+            "approval_id": self.approval_id,
         }
 
 @dataclass

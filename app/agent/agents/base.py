@@ -130,6 +130,11 @@ class BaseAgent(ABC):
                                     type=AgentChunkType.TRACE,
                                     data=payload,
                                 )
+                            elif event_type == "approval_requested":
+                                yield AgentChunk(
+                                    type=AgentChunkType.APPROVAL,
+                                    data=payload,
+                                )
                             else:
                                 result = payload
                         if result is None:
@@ -319,6 +324,11 @@ class BaseAgent(ABC):
                                             type=AgentChunkType.TRACE,
                                             data=payload,
                                         )
+                                    elif event_type == "approval_requested":
+                                        yield AgentChunk(
+                                            type=AgentChunkType.APPROVAL,
+                                            data=payload,
+                                        )
                                     else:
                                         result = payload
                                 if result is None:
@@ -397,6 +407,14 @@ class BaseAgent(ABC):
         tool_executor,
         tool_call: ToolCallInfo,
     ) -> AsyncGenerator[tuple[str, Any], None]:
+        """
+        执行工具调用（含 HITL 审批挂起）。
+
+        Yields:
+            ("trace", TraceStep)          - 子代理轨迹
+            ("approval_requested", dict)  - 危险工具待审批（需前端展示）
+            ("result", ToolResult)        - 最终执行结果
+        """
         if not tool_executor:
             yield (
                 "result",
@@ -429,10 +447,72 @@ class BaseAgent(ABC):
             yield ("result", result)
             return
 
+        # 执行（ToolExecutor 内部完成权限检查 + 审批预检 + 超时 + 注入净化）
         result = await tool_executor.execute(
             tool_call.name,
             tool_call.arguments,
         )
+
+        # ==========================================================================
+        # P0 安全: 人工介入审批（HITL）
+        # ToolExecutor 返回 APPROVAL_PENDING -> 挂起等待用户决策 -> 批准后重执行
+        # ==========================================================================
+        if result.error_code == "APPROVAL_PENDING" and result.approval_id:
+            try:
+                from app.security.approval import approval_manager
+                from app.security.approval import ApprovalStatus
+
+                yield (
+                    "approval_requested",
+                    {
+                        "approval_id": result.approval_id,
+                        "name": tool_call.name,
+                        "arguments": tool_call.arguments,
+                    },
+                )
+
+                decision = await approval_manager.await_decision(result.approval_id)
+
+                if decision.status == ApprovalStatus.APPROVED:
+                    logger.info(
+                        "Approval %s granted, re-executing tool %s",
+                        result.approval_id,
+                        tool_call.name,
+                    )
+                    result = await tool_executor.execute(
+                        tool_call.name,
+                        tool_call.arguments,
+                        bypass_approval=True,
+                    )
+                elif decision.status == ApprovalStatus.REJECTED:
+                    result = ToolResult(
+                        success=False,
+                        data=None,
+                        error="用户拒绝了该工具调用",
+                        error_code="APPROVAL_DENIED",
+                        retryable=False,
+                        suggestion="告知用户该操作未获批准，并询问替代方案",
+                    )
+                else:  # timeout / cancelled
+                    result = ToolResult(
+                        success=False,
+                        data=None,
+                        error="审批超时，该工具调用未获批准",
+                        error_code="APPROVAL_TIMEOUT",
+                        retryable=True,
+                        suggestion="可稍后重新请求审批，或改用其他工具",
+                    )
+            except Exception as e:
+                logger.error("Approval flow failed: %s", e, exc_info=True)
+                result = ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"审批流程异常: {e}",
+                    error_code="TOOL_ERROR",
+                    retryable=False,
+                    suggestion="请重试或改用其他工具",
+                )
+
         yield ("result", result)
 
     async def _invoke_with_tools(

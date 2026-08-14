@@ -408,6 +408,25 @@ class AgentService:
                     trace_steps.append(asdict(trace_step))
                     yield self._format_event("trace", asdict(trace_step))
 
+                elif chunk.type == AgentChunkType.APPROVAL:
+                    # P0 安全: HITL 审批请求 -> 转发 SSE（前端展示审批卡片）
+                    approval = chunk.data
+                    yield self._format_event(
+                        "approval_requested",
+                        {
+                            "approval_id": approval.get("approval_id"),
+                            "name": approval.get("name"),
+                            "arguments": approval.get("arguments"),
+                        },
+                    )
+                    log_structured_event(
+                        "agent_approval_requested",
+                        {
+                            "approval_id": approval.get("approval_id"),
+                            "tool": approval.get("name"),
+                        },
+                    )
+
                 elif chunk.type == AgentChunkType.ERROR:
                     yield self._format_event("error", chunk.data)
 

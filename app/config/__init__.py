@@ -65,6 +65,13 @@ from app.config.telemetry_config import (
     StructuredLogConfig,
     TrajectoryConfig,
 )
+from app.config.security_config import (
+    SecurityConfig,
+    CostGuardConfig,
+    ApprovalConfig,
+    PermissionConfig,
+    InjectionGuardConfig,
+)
 
 __all__ = [
     # Main settings
@@ -108,6 +115,12 @@ __all__ = [
     "TraceConfig",
     "StructuredLogConfig",
     "TrajectoryConfig",
+    # P0 Security configuration
+    "SecurityConfig",
+    "CostGuardConfig",
+    "ApprovalConfig",
+    "PermissionConfig",
+    "InjectionGuardConfig",
     # Image generation/storage configuration
     "ImageGenerationConfig",
     "ImageStorageConfig",

@@ -663,3 +663,31 @@ Headers: Retry-After: 60
 **This document will be continuously updated with security feature iterations.**
 
 If you discover security vulnerabilities, please report them via GitHub Issues or email the project maintainers.
+
+---
+
+## 8. P0 安全防护（新增）
+
+### 8.1 成本熔断（Cost Guard）— `app/security/cost_guard.py`
+- 按会话累计 token 用量（输入+输出），配置 `security.cost_guard`
+- 超过预算动作：`degrade`（提示降级低成本层级）/ `refuse`（拒绝调用）/ `warn`（仅告警）
+- 达到 `warn_threshold_ratio` 比例先告警；接入点 `LLMInvoker`（调用前检查、调用后记账）
+- 当前为进程内计数，多实例部署建议替换为 Redis 计数器
+
+### 8.2 人工介入审批（HITL）— `app/security/approval.py`
+- 危险工具（`required_tool_patterns`，支持 glob）调用前需用户审批
+- 流程：Agent 发起请求 → SSE `approval_requested` 事件 → 用户 approve/reject →
+  批准后重执行 / 拒绝返回 `APPROVAL_DENIED` / 超时返回 `APPROVAL_TIMEOUT`
+- API：`GET /agent/approvals/pending`，`POST /agent/approvals/{id}/approve|reject`
+- admin 用户可配置自动通过（`auto_approve_admin`）
+
+### 8.3 工具权限矩阵 — `app/security/permissions.py`
+- 规则优先级：admin > 显式 deny > 显式 allow > 默认拒绝（敏感工具）> 默认允许
+- 支持 glob 模式；越权返回结构化错误 `PERMISSION_DENIED`（retryable=False）
+- 接入点 `ToolExecutor.execute`
+
+### 8.4 注入纵深防御（第二层）— `app/security/injection.py`
+- 第一层：用户输入检查（`prompt_guard`）
+- 第二层：**工具返回内容**注入检测（搜索结果/网页内容可能携带恶意指令）
+- 内置模式：指令覆盖 / 系统提示词泄露 / 角色劫持 / 越狱 / `<|im_start|>` 注入特征
+- 动作：`block`（净化风险片段）/ `warn`（仅告警）；命中上报结构化安全事件

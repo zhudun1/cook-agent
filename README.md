@@ -61,6 +61,7 @@ CookHero 面向厨房新手、健身/减脂/控糖人群、健康饮食倡导者
 - **全链路可观测**：traceId 串联推理→工具→回答，Agent turn 轨迹 JSON 持久化支持回放调试，配置 YAML 外部化
 - **Grounding Truth 评测**：context_precision / context_recall / answer_correctness 离线批量评测与报告
 - **Harness 编排原语**：持久化 Goal（版本号乐观并发）、Todo 清单、结构化结果校验、后台作业、多阶段 workflow
+- **P0 安全防护**：成本熔断（token 预算）、人工介入审批（HITL）、工具权限矩阵、工具返回内容注入检测（纵深防御）
 
 ## ✨ 核心功能
 

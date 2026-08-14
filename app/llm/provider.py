@@ -303,28 +303,99 @@ class LLMInvoker:
         tools: list | None = None,
         **kwargs: Any,
     ) -> Any:
-        """韧性调用的统一实现。"""
+        """韧性调用的统一实现（含成本熔断检查与记账）。"""
         from app.llm.resilience import call_with_fallback
 
         cfg, chain, model_names = self._build_fallback_plan()
 
+        # ==========================================================================
+        # P0 安全: 成本熔断（调用前检查）
+        # ==========================================================================
+        session_id = self._session_id()
+        cost_check = self._cost_check(session_id)
+        if not cost_check.allowed:
+            from app.llm.resilience import LLMResilienceError
+
+            raise LLMResilienceError(
+                f"Cost guard: {cost_check.reason}",
+                error_type="COST_LIMIT",
+                retryable=False,
+                attempts=0,
+                models_tried=[],
+            )
+
         # 未启用韧性：直接调用（随机模型负载均衡）
         if not cfg.fallback.enabled and cfg.retry.max_retries == 0:
-            return await self._get_llm_with_model(tools=tools).ainvoke(
+            response = await self._get_llm_with_model(tools=tools).ainvoke(
                 messages, **kwargs
             )
+            self._record_usage(session_id, response)
+            return response
 
         async def call(llm_type: str, model: str) -> Any:
             llm = self._make_llm(model, llm_type, tools)
             return await llm.ainvoke(messages, **kwargs)
 
-        return await call_with_fallback(
+        response = await call_with_fallback(
             call,
             chain,
             model_names,
             cfg,
             on_event=self._on_resilience_event,
         )
+        self._record_usage(session_id, response)
+        return response
+
+    # ------------------------------------------------------------------
+    # 成本熔断辅助
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _session_id() -> Optional[str]:
+        """从 LLM 上下文取会话 ID（conversation_id 优先）。"""
+        try:
+            from app.llm.context import get_llm_context
+
+            ctx = get_llm_context()
+            if ctx:
+                return ctx.conversation_id or ctx.request_id
+        except Exception:
+            pass
+        return None
+
+    def _cost_check(self, session_id: Optional[str]):
+        """成本熔断检查（未启用/无会话时放行）。"""
+        try:
+            from app.security.cost_guard import cost_guard
+
+            if session_id:
+                return cost_guard.check(session_id)
+        except Exception:
+            pass
+        from app.security.cost_guard import CostCheckResult
+
+        return CostCheckResult(True, "ok", "cost guard unavailable")
+
+    def _record_usage(self, session_id: Optional[str], response: Any) -> None:
+        """调用后按 usage_metadata 记账。"""
+        if not session_id:
+            return
+        try:
+            input_tokens = output_tokens = None
+            metadata = getattr(response, "usage_metadata", None)
+            if metadata:
+                if isinstance(metadata, dict):
+                    input_tokens = metadata.get("input_tokens")
+                    output_tokens = metadata.get("output_tokens")
+                else:
+                    input_tokens = getattr(metadata, "input_tokens", None)
+                    output_tokens = getattr(metadata, "output_tokens", None)
+            if input_tokens is None and output_tokens is None:
+                return
+            from app.security.cost_guard import cost_guard
+
+            cost_guard.record(session_id, input_tokens or 0, output_tokens or 0)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # 流式调用（首块前重试，出流后不重试避免内容重复）
@@ -351,6 +422,18 @@ class LLMInvoker:
         from app.llm.resilience import async_retry, LLMResilienceError
 
         cfg, chain, model_names = self._build_fallback_plan()
+
+        # P0 安全: 成本熔断（流式调用前检查）
+        session_id = self._session_id()
+        cost_check = self._cost_check(session_id)
+        if not cost_check.allowed:
+            raise LLMResilienceError(
+                f"Cost guard: {cost_check.reason}",
+                error_type="COST_LIMIT",
+                retryable=False,
+                attempts=0,
+                models_tried=[],
+            )
 
         if not cfg.fallback.enabled and cfg.retry.max_retries == 0:
             async for chunk in self._get_llm_with_model(tools=tools).astream(

@@ -893,3 +893,91 @@ async def delete_subagent(subagent_name: str, http_request: Request):
         raise HTTPException(status_code=404, detail="Subagent not found")
 
     return {"message": "Subagent deleted successfully"}
+
+
+# =============================================================================
+# P0 Security: 人工介入审批（HITL）API
+# =============================================================================
+
+@router.get("/agent/approvals/pending")
+async def list_pending_approvals(
+    http_request: Request,
+    session_id: Optional[str] = None,
+    limit: int = 50,
+):
+    """
+    列出待审批请求（前端审批卡片数据源）。
+
+    **Parameters:**
+    - `session_id`: 可选，按会话过滤
+    - `limit`: 返回条数上限
+    """
+    user_id = getattr(http_request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="需要登录")
+
+    try:
+        from app.security.approval import approval_manager
+
+        requests = approval_manager.list_pending(
+            session_id=session_id, limit=limit
+        )
+        # 仅返回当前用户相关的审批（或全部——审批人即操作者本人，简化处理）
+        return {"pending_approvals": requests}
+    except Exception as e:
+        logger.error("Failed to list approvals: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="查询审批列表失败")
+
+
+@router.post("/agent/approvals/{approval_id}/approve")
+async def approve_tool_call(approval_id: str, http_request: Request):
+    """
+    批准工具调用。
+
+    **Parameters:**
+    - `approval_id`: 审批请求 ID
+    """
+    user_id = getattr(http_request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="需要登录")
+
+    try:
+        from app.security.approval import approval_manager
+
+        success = approval_manager.decide(
+            approval_id, approve=True, by_user=user_id
+        )
+    except Exception as e:
+        logger.error("Failed to approve %s: %s", approval_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="审批操作失败")
+    if not success:
+        raise HTTPException(status_code=404, detail="审批请求不存在或已处理")
+
+    return {"message": "已批准", "approval_id": approval_id}
+
+
+@router.post("/agent/approvals/{approval_id}/reject")
+async def reject_tool_call(approval_id: str, http_request: Request):
+    """
+    拒绝工具调用。
+
+    **Parameters:**
+    - `approval_id`: 审批请求 ID
+    """
+    user_id = getattr(http_request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="需要登录")
+
+    try:
+        from app.security.approval import approval_manager
+
+        success = approval_manager.decide(
+            approval_id, approve=False, by_user=user_id
+        )
+    except Exception as e:
+        logger.error("Failed to reject %s: %s", approval_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="审批操作失败")
+    if not success:
+        raise HTTPException(status_code=404, detail="审批请求不存在或已处理")
+
+    return {"message": "已拒绝", "approval_id": approval_id}

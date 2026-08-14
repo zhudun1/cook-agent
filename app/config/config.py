@@ -26,6 +26,7 @@ from app.config.mcp_config import MCPConfig
 from app.config.tokenizer_config import TokenizerConfig
 from app.config.resilience_config import ResilienceConfig
 from app.config.telemetry_config import TelemetryConfig
+from app.config.security_config import SecurityConfig
 from app.config.config_loader import (
     load_database_config,
     load_llm_config,
@@ -39,6 +40,7 @@ from app.config.config_loader import (
     load_tokenizer_config,
     load_resilience_config,
     load_telemetry_config,
+    load_security_config,
 )
 
 
@@ -130,6 +132,9 @@ class Settings(BaseModel):
 
     # Telemetry configuration (trace / structured log / trajectory) loaded from config.yml
     telemetry: TelemetryConfig = load_telemetry_config()
+
+    # P0 Security configuration (cost guard / approval / permissions / injection)
+    security: SecurityConfig = load_security_config()
 
     class Config:
         arbitrary_types_allowed = True

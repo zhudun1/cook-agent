@@ -34,6 +34,7 @@ from app.config.mcp_config import MCPConfig, MCPServerConfig
 from app.config.tokenizer_config import TokenizerConfig
 from app.config.resilience_config import ResilienceConfig
 from app.config.telemetry_config import TelemetryConfig
+from app.config.security_config import SecurityConfig
 
 
 # Load .env file into environment variables at module import
@@ -347,3 +348,14 @@ def load_telemetry_config() -> TelemetryConfig:
     config_data = _load_config_data()
     data = dict(config_data.get("telemetry", {}) or {})
     return TelemetryConfig.model_validate(data)
+
+
+def load_security_config() -> SecurityConfig:
+    """
+    Load P0 security configuration from YAML.
+
+    Section: security (cost_guard / approval / permissions / injection_guard)
+    """
+    config_data = _load_config_data()
+    data = dict(config_data.get("security", {}) or {})
+    return SecurityConfig.model_validate(data)

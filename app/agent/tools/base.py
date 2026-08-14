@@ -270,13 +270,16 @@ class ToolExecutor:
         tool_name: str,
         arguments: str | dict,
         event_handler: Optional[Callable[[Any], Awaitable[None]]] = None,
+        bypass_approval: bool = False,
     ) -> ToolResult:
         """
-        执行指定的 Tool（带独立超时与结构化错误）。
+        执行指定的 Tool（权限检查 + 审批 + 独立超时 + 注入净化）。
 
         Args:
             tool_name: Tool 名称
             arguments: Tool 参数
+            event_handler: 子代理事件处理器
+            bypass_approval: 审批通过后的重执行标记（跳过审批检查）
 
         Returns:
             ToolResult: 执行结果（失败时携带 error_code/retryable/suggestion）
@@ -292,6 +295,69 @@ class ToolExecutor:
                 suggestion="请检查工具名称是否正确，或改用其他可用工具",
             )
 
+        # ==========================================================================
+        # P0 安全 1/3: 工具权限矩阵
+        # ==========================================================================
+        try:
+            from app.security.permissions import permission_matrix
+
+            decision = permission_matrix.check(tool_name, self.user_id)
+            if not decision.allowed:
+                logger.warning(
+                    "Permission denied: tool=%s user=%s reason=%s",
+                    tool_name,
+                    self.user_id,
+                    decision.reason,
+                )
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Permission denied: {decision.reason}",
+                    error_code="PERMISSION_DENIED",
+                    retryable=False,
+                    suggestion="你没有权限调用该工具，请告知用户或改用其他工具",
+                )
+        except Exception as e:
+            logger.debug("Permission check skipped: %s", e)
+
+        # ==========================================================================
+        # P0 安全 2/3: 人工介入审批（危险工具）
+        # ==========================================================================
+        if not bypass_approval:
+            try:
+                from app.security.approval import approval_manager
+
+                if approval_manager.requires_approval(tool_name):
+                    if approval_manager.auto_approve(self.user_id):
+                        logger.info(
+                            "Tool %s auto-approved for admin %s",
+                            tool_name,
+                            self.user_id,
+                        )
+                    else:
+                        pre_args = tool.parse_arguments(arguments) or {}
+                        req = approval_manager.request(
+                            tool_name,
+                            dict(pre_args),
+                            user_id=self.user_id,
+                        )
+                        logger.info(
+                            "Tool %s requires approval: approval_id=%s",
+                            tool_name,
+                            req.approval_id,
+                        )
+                        return ToolResult(
+                            success=False,
+                            data=None,
+                            error=f"Tool '{tool_name}' requires user approval",
+                            error_code="APPROVAL_PENDING",
+                            retryable=True,
+                            suggestion="等待用户审批该工具调用",
+                            approval_id=req.approval_id,
+                        )
+            except Exception as e:
+                logger.debug("Approval check skipped: %s", e)
+
         parsed_args = tool.parse_arguments(arguments) or {}
         parsed_args = dict(parsed_args)
         if self.user_id and "user_id" not in parsed_args:
@@ -301,28 +367,45 @@ class ToolExecutor:
 
         timeout = self._timeout_for(tool_name)
         if timeout is None:
-            return await tool.safe_execute(**parsed_args)
+            result = await tool.safe_execute(**parsed_args)
+        else:
+            try:
+                result = await asyncio.wait_for(
+                    tool.safe_execute(**parsed_args),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Tool %s timed out after %.1fs (user_id=%s)",
+                    tool_name,
+                    timeout,
+                    self.user_id,
+                )
+                result = ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Tool '{tool_name}' timed out after {timeout:.1f}s",
+                    error_code="TIMEOUT",
+                    retryable=True,
+                    suggestion="工具执行超时，可稍后重试、简化参数或改用其他工具",
+                )
 
-        try:
-            return await asyncio.wait_for(
-                tool.safe_execute(**parsed_args),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "Tool %s timed out after %.1fs (user_id=%s)",
-                tool_name,
-                timeout,
-                self.user_id,
-            )
-            return ToolResult(
-                success=False,
-                data=None,
-                error=f"Tool '{tool_name}' timed out after {timeout:.1f}s",
-                error_code="TIMEOUT",
-                retryable=True,
-                suggestion="工具执行超时，可稍后重试、简化参数或改用其他工具",
-            )
+        # ==========================================================================
+        # P0 安全 3/3: 工具返回内容注入检测（纵深防御第二层）
+        # ==========================================================================
+        if result.success and result.data is not None:
+            try:
+                from app.security.injection import injection_detector
+
+                scan = injection_detector.scan_tool_result(
+                    tool_name, str(result.data)
+                )
+                if scan.blocked and scan.sanitized is not None:
+                    result.data = scan.sanitized
+            except Exception as e:
+                logger.debug("Injection scan skipped: %s", e)
+
+        return result
 
     def get_schemas(self, tool_names: Optional[list[str]] = None) -> list[dict]:
         """
