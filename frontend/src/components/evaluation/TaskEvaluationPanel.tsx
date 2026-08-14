@@ -94,7 +94,7 @@ export function TaskEvaluationPanel({ token }: { token?: string }) {
             任务级端到端评测
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            黄金任务集 -> Agent 完整执行 -> 判定任务是否达成（完成率）
+            黄金任务集 → Agent 完整执行 → 判定任务是否达成（完成率）
           </p>
         </div>
         <button
