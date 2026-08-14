@@ -82,6 +82,18 @@ class AgentContextBuilder:
                 system_prompt="You are a helpful assistant.",
             )
 
+        # P3 Prompt 版本灰度：按用户稳定分流解析版本化 system_prompt
+        try:
+            from app.prompts.registry import prompt_registry
+
+            resolved_prompt = prompt_registry.get(
+                config.name, user_id, default=config.system_prompt
+            )
+            if resolved_prompt:
+                config.system_prompt = resolved_prompt
+        except Exception as e:
+            logger.debug("Prompt registry resolution skipped: %s", e)
+
         # 2. 获取历史摘要
         (
             compressed_summary,
@@ -119,6 +131,18 @@ class AgentContextBuilder:
         if images:
             processed_images = await self._process_images(images)
 
+        # 7. P2 长期记忆：回忆检索相关记忆（注入 system prompt）
+        long_term_memory = None
+        if user_id:
+            try:
+                from app.memory.manager import memory_manager
+
+                long_term_memory = await memory_manager.build_context(
+                    user_id, current_message
+                )
+            except Exception as e:
+                logger.debug("Long-term memory recall skipped: %s", e)
+
         return AgentContext(
             system_prompt=config.system_prompt,
             user_id=session.user_id,
@@ -130,6 +154,7 @@ class AgentContextBuilder:
             available_tools=available_tools,
             current_message=current_message,
             images=processed_images,
+            long_term_memory=long_term_memory,
         )
 
     async def _process_images(self, images: list[dict]) -> list[dict]:
@@ -182,7 +207,7 @@ class AgentContextBuilder:
         from app.llm.window import ContextWindow
         from app.config import settings
 
-        # 1. System prompt（含用户画像和指令）
+        # 1. System prompt（含用户画像和指令 + 长期记忆）
         system_content = context.system_prompt
 
         if context.user_id:
@@ -193,6 +218,10 @@ class AgentContextBuilder:
 
         if context.user_instruction:
             system_content += f"\n\n## 用户指令\n{context.user_instruction}"
+
+        # P2 长期记忆（跨会话偏好/目标/限制）
+        if context.long_term_memory:
+            system_content += f"\n\n## 用户长期记忆\n{context.long_term_memory}"
 
         # 2. 历史摘要
         history_summary = context.history_summary

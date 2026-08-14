@@ -186,6 +186,14 @@ class AgentService:
             actual_session_id = str(session.id)
             set_attribute("session_id", actual_session_id)
 
+            # P3 断点恢复：事件流存储（前端重连回放）
+            from app.agent.event_stream import event_stream_store
+
+            def emit(event_type: str, data: dict) -> str:
+                event_str = self._format_event(event_type, data)
+                event_stream_store.append(actual_session_id, event_str)
+                return event_str
+
             # 轨迹记录器（Agent turn 轨迹 JSON 持久化，支持回放调试）
             recorder = TrajectoryRecorder(
                 trace_id=trace_id,
@@ -195,7 +203,7 @@ class AgentService:
             )
 
             # 2. 发送 session 信息
-            yield self._format_event(
+            yield emit(
                 "session",
                 {
                     "session_id": actual_session_id,
@@ -242,7 +250,7 @@ class AgentService:
                             "error": None,
                         }
                     )
-                    yield self._format_event("vision", vision_result)
+                    yield emit("vision", vision_result)
 
             # 5. 获取 Agent
             agent = self._get_agent_or_fallback(agent_name)
@@ -269,7 +277,7 @@ class AgentService:
                     if thinking_end_time is None:
                         thinking_end_time = time.time()
                     response_content += chunk.data
-                    yield self._format_event(
+                    yield emit(
                         "text",
                         {
                             "content": chunk.data,
@@ -326,7 +334,7 @@ class AgentService:
                             ],
                         }
                     )
-                    yield self._format_event(
+                    yield emit(
                         "tool_call",
                         {
                             "id": tool_call.id,
@@ -392,7 +400,7 @@ class AgentService:
                             ],
                         }
                     )
-                    yield self._format_event(
+                    yield emit(
                         "tool_result",
                         {
                             "name": result.name,
@@ -406,12 +414,12 @@ class AgentService:
                 elif chunk.type == AgentChunkType.TRACE:
                     trace_step = chunk.data
                     trace_steps.append(asdict(trace_step))
-                    yield self._format_event("trace", asdict(trace_step))
+                    yield emit("trace", asdict(trace_step))
 
                 elif chunk.type == AgentChunkType.APPROVAL:
                     # P0 安全: HITL 审批请求 -> 转发 SSE（前端展示审批卡片）
                     approval = chunk.data
-                    yield self._format_event(
+                    yield emit(
                         "approval_requested",
                         {
                             "approval_id": approval.get("approval_id"),
@@ -428,7 +436,7 @@ class AgentService:
                     )
 
                 elif chunk.type == AgentChunkType.ERROR:
-                    yield self._format_event("error", chunk.data)
+                    yield emit("error", chunk.data)
 
                 elif chunk.type == AgentChunkType.DONE:
                     # Track answer end time
@@ -455,7 +463,7 @@ class AgentService:
                             (answer_end_time - thinking_start_time) * 1000
                         )
 
-                    yield self._format_event(
+                    yield emit(
                         "done",
                         {
                             "session_id": actual_session_id,
@@ -589,12 +597,35 @@ class AgentService:
                 )
             )
 
+            # 10. P2 长期记忆：对话结束后后台提取并存储（跨会话记忆沉淀）
+            try:
+                from app.memory.manager import memory_manager
+
+                async def _extract_memory():
+                    history = await self.repository.get_messages(actual_session_id, limit=50)
+                    msgs = [
+                        {"role": m.role, "content": m.content}
+                        for m in history
+                        if m.role in ("user", "assistant") and m.content
+                    ]
+                    await memory_manager.extract_and_store(
+                        actual_session_id, user_id, msgs
+                    )
+
+                asyncio.create_task(_extract_memory())
+            except Exception as e:
+                logger.debug("Long-term memory extraction task skipped: %s", e)
+
         except Exception as e:
             logger.exception(f"AgentService.chat failed: {e}")
             if recorder is not None:
                 recorder.record("error", {"error": str(e)})
                 recorder.save()
-            yield self._format_event("error", {"error": str(e)})
+            # actual_session_id 可能尚未赋值（异常发生在会话创建前）
+            if "actual_session_id" in dir() and "emit" in dir():
+                yield emit("error", {"error": str(e)})
+            else:
+                yield self._format_event("error", {"error": str(e)})
         finally:
             clear_trace_id()
 

@@ -88,6 +88,7 @@ class BaseAgent(ABC):
         tool_executor = AgentHub.create_tool_executor(
             selected_tool_names if selected_tool_names else None,
             user_id=context.user_id,
+            session_id=context.session_id,
         )
 
         # ReAct 循环
@@ -267,6 +268,7 @@ class BaseAgent(ABC):
         tool_executor = AgentHub.create_tool_executor(
             selected_tool_names if selected_tool_names else None,
             user_id=context.user_id,
+            session_id=context.session_id,
         )
 
         for iteration in range(self.max_iterations):

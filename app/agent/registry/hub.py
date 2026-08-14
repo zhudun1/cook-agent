@@ -73,6 +73,9 @@ class AgentHub:
 
     _agents: dict[str, _AgentEntry] = {}
     _providers: dict[str, ToolProvider] = {}
+    # P3 多租户隔离：会话级有状态工具实例缓存
+    # key = (session_id, tool_name)，仅缓存 is_stateful 工具的克隆实例
+    _session_tools: dict[tuple[str, str], "BaseTool"] = {}
 
     # ==================== Agent ====================
 
@@ -139,6 +142,46 @@ class AgentHub:
             if p.get_tool(name):
                 return p.unregister_tool(name)
         return False
+
+    @classmethod
+    def get_tool_for_session(
+        cls,
+        name: str,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Optional[BaseTool]:
+        """
+        获取工具实例（P3 多租户隔离）。
+
+        - 无 session_id：返回全局实例（schema 用途）
+        - 有 session_id 且有状态工具：返回该会话的独立克隆实例（缓存复用）
+        - 无状态工具：返回全局实例（安全共享）
+        """
+        if not session_id:
+            return cls.get_tool(name, user_id)
+
+        key = (session_id, name)
+        cached = cls._session_tools.get(key)
+        if cached is not None:
+            return cached
+
+        tool = cls.get_tool(name, user_id)
+        if tool is None:
+            return None
+        if getattr(tool, "is_stateful", False):
+            cloned = tool.clone_for_session(user_id=user_id, session_id=session_id)
+            cls._session_tools[key] = cloned
+            return cloned
+        return tool
+
+    @classmethod
+    def clear_session_tools(cls, session_id: Optional[str] = None) -> None:
+        """清理会话级工具实例缓存（会话结束/内存治理时调用）。"""
+        if session_id is None:
+            cls._session_tools.clear()
+            return
+        for key in [k for k in cls._session_tools if k[0] == session_id]:
+            cls._session_tools.pop(key, None)
 
     @classmethod
     def get_tool(cls, name: str, user_id: Optional[str] = None) -> Optional[BaseTool]:
@@ -215,6 +258,7 @@ class AgentHub:
         cls,
         tool_names: Optional[list[str]] = None,
         user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> ToolExecutor:
         if tool_names is None:
             tools: dict[str, BaseTool] = {}
@@ -224,17 +268,14 @@ class AgentHub:
                 else:
                     tool_list = p.list_tool_names()
                 for name in tool_list:
-                    if p.name == "subagent" and user_id:
-                        tool = p.get_tool(name, user_id)  # type: ignore
-                    else:
-                        tool = p.get_tool(name)
+                    tool = cls.get_tool_for_session(name, user_id, session_id)
                     if tool:
                         tools[name] = tool
             return ToolExecutor(tools, user_id=user_id)
 
         tools = {}
         for n in tool_names:
-            tool = cls.get_tool(n, user_id)
+            tool = cls.get_tool_for_session(n, user_id, session_id)
             if tool:
                 tools[n] = tool
         return ToolExecutor(tools, user_id=user_id)

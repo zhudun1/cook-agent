@@ -27,6 +27,7 @@ from app.config.tokenizer_config import TokenizerConfig
 from app.config.resilience_config import ResilienceConfig
 from app.config.telemetry_config import TelemetryConfig
 from app.config.security_config import SecurityConfig
+from app.config.memory_config import MemoryConfig
 from app.config.config_loader import (
     load_database_config,
     load_llm_config,
@@ -41,6 +42,7 @@ from app.config.config_loader import (
     load_resilience_config,
     load_telemetry_config,
     load_security_config,
+    load_memory_config,
 )
 
 
@@ -135,6 +137,9 @@ class Settings(BaseModel):
 
     # P0 Security configuration (cost guard / approval / permissions / injection)
     security: SecurityConfig = load_security_config()
+
+    # P2 Long-term memory configuration
+    memory: MemoryConfig = load_memory_config()
 
     class Config:
         arbitrary_types_allowed = True

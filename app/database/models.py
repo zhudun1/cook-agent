@@ -363,6 +363,55 @@ class RAGEvaluationModel(Base):
         }
 
 
+# ==================== Long-term Memory Model ====================
+
+class UserMemoryModel(Base):
+    """
+    ORM model for cross-session long-term memory entries.
+    Stores user preferences / goals / restrictions extracted from conversations.
+    """
+
+    __tablename__ = "user_memories"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    memory_type: Mapped[str] = mapped_column(
+        String(32), default="fact", nullable=False
+    )  # preference | goal | restriction | fact
+    importance: Mapped[float] = mapped_column(default=0.5, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), default="extracted", nullable=False)
+    source_session_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    access_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    last_accessed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_user_memories_user_created", "user_id", "created_at"),
+        Index("ix_user_memories_user_type", "user_id", "memory_type"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "user_id": self.user_id,
+            "content": self.content,
+            "memory_type": self.memory_type,
+            "importance": self.importance,
+            "source": self.source,
+            "source_session_id": self.source_session_id,
+            "access_count": self.access_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_accessed_at": self.last_accessed_at.isoformat()
+            if self.last_accessed_at
+            else None,
+        }
+
+
 # ==================== LLM Usage Log Model ====================
 
 class LLMUsageLogModel(Base):

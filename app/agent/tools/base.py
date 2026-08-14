@@ -60,6 +60,11 @@ class BaseTool(ABC):
     name: str
     description: str
 
+    # 有状态工具标记（P3 多租户隔离）：
+    # True 表示工具持有会话相关状态（连接/缓存/上下文），
+    # 每个 session 使用独立实例（clone_for_session），避免用户间串数据。
+    is_stateful: bool = False
+
     # JSON Schema 格式的参数定义
     parameters: dict = {
         "type": "object",
@@ -73,6 +78,26 @@ class BaseTool(ABC):
             raise ValueError("Tool must have a name")
         if not hasattr(self, "description") or not self.description:
             raise ValueError("Tool must have a description")
+
+    def clone_for_session(
+        self,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> "BaseTool":
+        """
+        按会话克隆工具实例（多租户隔离）。
+
+        无状态工具返回自身（安全共享）；有状态工具由子类覆写为
+        创建携带独立状态的新实例。
+
+        Args:
+            user_id: 用户 ID
+            session_id: 会话 ID
+
+        Returns:
+            会话级工具实例
+        """
+        return self
 
     @abstractmethod
     async def execute(self, **kwargs) -> ToolResult:
@@ -186,6 +211,9 @@ class MCPTool(BaseTool):
     用于调用外部 MCP 服务。
     """
 
+    # MCP 工具持有连接配置，属于有状态工具（按会话隔离实例）
+    is_stateful = True
+
     mcp_endpoint: str
     mcp_tool_name: str
 
@@ -206,6 +234,21 @@ class MCPTool(BaseTool):
         if parameters:
             self.parameters = parameters
         super().__init__()
+
+    def clone_for_session(
+        self,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> "MCPTool":
+        """按会话创建独立 MCP 工具实例（连接配置不变，实例隔离）。"""
+        return MCPTool(
+            name=self.name,
+            description=self.description,
+            mcp_endpoint=self.mcp_endpoint,
+            mcp_tool_name=self.mcp_tool_name,
+            mcp_headers=dict(self.mcp_headers),
+            parameters=dict(self.parameters),
+        )
 
     async def execute(self, **kwargs) -> ToolResult:
         """

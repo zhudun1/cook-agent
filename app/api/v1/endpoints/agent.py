@@ -9,7 +9,7 @@ import base64
 import logging
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, HttpUrl
 
@@ -893,6 +893,44 @@ async def delete_subagent(subagent_name: str, http_request: Request):
         raise HTTPException(status_code=404, detail="Subagent not found")
 
     return {"message": "Subagent deleted successfully"}
+
+
+# =============================================================================
+# P3: 会话断点恢复 API
+# =============================================================================
+
+@router.get("/agent/session/{session_id}/stream/events")
+async def get_session_stream_events(
+    session_id: str,
+    request: Request,
+    after: int = Query(-1, description="只返回序号大于该值的事件（-1 返回全部）"),
+    limit: int = Query(500, ge=1, le=1000),
+):
+    """
+    会话事件流增量拉取（断线重连回放）。
+
+    前端断线后携带上次收到的最大 seq 调用本接口，
+    后端返回缺失事件（SSE 原文），按序回放即可恢复实时展示。
+
+    **Parameters:**
+    - `session_id`: 会话 ID
+    - `after`: 上次收到的最大事件序号（-1 拉取全部缓存）
+    - `limit`: 最大返回条数
+    """
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="需要登录")
+
+    from app.agent.event_stream import event_stream_store
+
+    events = event_stream_store.get_events(session_id, after_seq=after, limit=limit)
+    return {
+        "session_id": session_id,
+        "after": after,
+        "next_seq": event_stream_store.next_seq(session_id),
+        "events": events,
+        "has_more": len(events) >= limit,
+    }
 
 
 # =============================================================================

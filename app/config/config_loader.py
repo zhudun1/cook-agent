@@ -35,6 +35,7 @@ from app.config.tokenizer_config import TokenizerConfig
 from app.config.resilience_config import ResilienceConfig
 from app.config.telemetry_config import TelemetryConfig
 from app.config.security_config import SecurityConfig
+from app.config.memory_config import MemoryConfig
 
 
 # Load .env file into environment variables at module import
@@ -359,3 +360,14 @@ def load_security_config() -> SecurityConfig:
     config_data = _load_config_data()
     data = dict(config_data.get("security", {}) or {})
     return SecurityConfig.model_validate(data)
+
+
+def load_memory_config() -> MemoryConfig:
+    """
+    Load P2 long-term memory configuration from YAML.
+
+    Section: memory
+    """
+    config_data = _load_config_data()
+    data = dict(config_data.get("memory", {}) or {})
+    return MemoryConfig.model_validate(data)

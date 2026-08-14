@@ -122,6 +122,7 @@ class AgentContext:
     vision_analysis: dict | None = None  # Vision analysis result
     vision_tool_call_id: str | None = None  # Vision tool call id
     window_stats: dict | None = None  # 滑动窗口截断统计（token 预算/丢弃消息数）
+    long_term_memory: str | None = None  # P2 跨会话长期记忆上下文（注入 system prompt）
 
 
 @dataclass

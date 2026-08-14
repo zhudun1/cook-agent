@@ -34,6 +34,20 @@ logger = logging.getLogger(__name__)
 setup_secure_logging()
 
 
+
+
+def _load_config_prompt_registry() -> dict:
+    """从 config.yml 加载 prompt_registry 段。"""
+    import yaml
+
+    try:
+        with open("config.yml", "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return data.get("prompt_registry", {}) or {}
+    except Exception:
+        return {}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
@@ -54,6 +68,26 @@ async def lifespan(app: FastAPI):
         configure_from_settings()
     except Exception as e:
         logger.warning("Failed to setup structured logging: %s", e)
+
+    # P3 Prompt 版本注册（从 config.yml prompt_registry 段加载）
+    try:
+        from app.prompts.registry import prompt_registry
+
+        pr_data = _load_config_prompt_registry()
+        for name, versions in pr_data.items():
+            for v in versions:
+                prompt_registry.register(
+                    name=name,
+                    content=v.get("content", ""),
+                    version=v.get("version", "v1"),
+                    weight=float(v.get("weight", 1.0)),
+                    description=v.get("description", ""),
+                )
+                logger.info(
+                    "Registered prompt %s/%s", name, v.get("version", "v1")
+                )
+    except Exception as e:
+        logger.warning("Prompt registry setup skipped: %s", e)
 
     logger.info("Initializing database...")
     await init_db()
