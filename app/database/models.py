@@ -19,8 +19,36 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Uuid as _SqlUuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class UUID(_SqlUuid):
+    """
+    宽松 UUID 类型（跨 PostgreSQL / SQLite）。
+
+    SQLAlchemy 的 Uuid 类型在绑定 str 输入时（如 `WHERE id = 'abc...'`）
+    在 SQLite 下会报 "'str' object has no attribute 'hex'"（PostgreSQL 的
+    asyncpg 驱动会自动转换所以无感）。本类型在绑定处理器中先把 str 转成
+    uuid.UUID，兼容两种数据库与两种输入形式。
+    """
+
+    def bind_processor(self, dialect):
+        impl = super().bind_processor(dialect)
+
+        def process(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                try:
+                    value = uuid.UUID(value)
+                except (ValueError, AttributeError):
+                    return value  # 非 UUID 字符串原样透传，交由数据库报错
+            if impl is not None:
+                return impl(value)
+            return value
+
+        return process
 
 
 class Base(DeclarativeBase):

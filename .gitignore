@@ -42,3 +42,7 @@ blog/
 /data/harness/
 /data/logs/
 /data/evaluation_reports/
+cookhero_local.db
+data/trajectories/
+data/logs/
+.venv312/

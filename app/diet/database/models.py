@@ -20,10 +20,9 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database.models import Base
+from app.database.models import Base, UUID
 
 
 class MealType(str, Enum):
@@ -112,7 +111,7 @@ class DietLogItemModel(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     log_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+        UUID(as_uuid=True), nullable=False
     )
     user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     log_date: Mapped[date] = mapped_column(Date, nullable=False)

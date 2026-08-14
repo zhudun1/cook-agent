@@ -42,6 +42,10 @@ class DocumentRepository:
             return
         
         async with get_session_context() as session:
+            # 方言感知：PostgreSQL 用 array_agg；SQLite 用 group_concat
+            dialect = session.bind.dialect.name
+            use_sqlite = dialect == "sqlite"
+
             # 1. Load global metadata (user_id is NULL)
             cls._global_cache = {"dish_name": [], "category": [], "difficulty": []}
             for field_name in cls._global_cache.keys():
@@ -56,9 +60,13 @@ class DocumentRepository:
             cls._user_cache = {}
             for field_name in ("dish_name", "category", "difficulty"):
                 field = getattr(KnowledgeDocumentModel, field_name)
+                if use_sqlite:
+                    agg = func.group_concat(func.distinct(field))
+                else:
+                    agg = func.array_agg(func.distinct(field))
                 stmt = select(
                     KnowledgeDocumentModel.user_id,
-                    func.array_agg(func.distinct(field))
+                    agg,
                 ).where(
                     KnowledgeDocumentModel.user_id.is_not(None)
                 ).group_by(KnowledgeDocumentModel.user_id)
@@ -72,6 +80,9 @@ class DocumentRepository:
                             "category": [],
                             "difficulty": [],
                         }
+                    if use_sqlite:
+                        # group_concat 返回逗号分隔字符串
+                        values = [v.strip() for v in (values or "").split(",") if v.strip()]
                     cls._user_cache[user_id][field_name] = sorted([v for v in (values or []) if v])
         
         cls._cache_initialized = True

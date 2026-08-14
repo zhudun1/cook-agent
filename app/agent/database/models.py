@@ -18,10 +18,9 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.models import Base
+from app.database.models import Base, UUID
 
 
 class AgentSessionModel(Base):
