@@ -765,9 +765,9 @@ export default function EvaluationPage() {
                <AlertList data={alerts} loading={loading} />
             </div>
           </section>
+        </div>
         </>
         )}
-        </div>
       </div>
     </div>
   );
