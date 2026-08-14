@@ -4,7 +4,8 @@
  */
 import { useState } from 'react';
 import { CheckCircle2, Loader2, Play, RefreshCcw, XCircle } from 'lucide-react';
-import { API_BASE, createJsonHeaders, createAuthHeaders } from '../../services/api/client';
+import { createJsonHeaders, createAuthHeaders } from '../../services/api/client';
+import { API_BASE } from '../../constants';
 
 interface TaskEvalResult {
   datasets?: Record<string, DatasetResult>;

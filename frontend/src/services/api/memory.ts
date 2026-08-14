@@ -1,7 +1,8 @@
 /**
  * 长期记忆 API（P2）
  */
-import { API_BASE, createAuthHeaders, createJsonHeaders, parseErrorResponse } from './client';
+import { createAuthHeaders, createJsonHeaders, parseErrorResponse } from './client';
+import { API_BASE } from '../../constants';
 
 export interface MemoryItem {
   id: string;
