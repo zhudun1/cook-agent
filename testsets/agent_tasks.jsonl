@@ -1,0 +1,4 @@
+{"task": "帮我计算 15*4+2 等于多少", "expected_outcome": "回答中应包含数字 62", "tools_required": ["calculator"], "metadata": {"difficulty": "easy", "category": "calculation"}}
+{"task": "今天是几号？请告诉我今天的日期", "expected_outcome": "回答中应包含今天的日期", "tools_required": ["datetime"], "metadata": {"difficulty": "easy", "category": "datetime"}}
+{"task": "请搜索一下西红柿炒鸡蛋的做法", "expected_outcome": "回答中应包含西红柿炒鸡蛋的相关做法信息", "tools_required": ["web_search"], "metadata": {"difficulty": "medium", "category": "search"}}
+{"task": "计算 (8+12)*3 的结果", "expected_outcome": "回答中应包含数字 60", "tools_required": ["calculator"], "metadata": {"difficulty": "easy", "category": "calculation"}}

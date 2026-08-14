@@ -20,10 +20,19 @@ import {
   listAgentSessions,
   getAgentSessionHistory,
   deleteAgentSession,
-  updateAgentSessionTitle
+  updateAgentSessionTitle,
+  approveToolCall,
+  rejectToolCall,
 } from '../services/api/agent';
 import { generateId, waitForNextTick } from '../utils';
 import { STORAGE_KEYS } from '../constants';
+
+// 审批请求（HITL）
+export interface PendingApproval {
+  approval_id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
 
 // Type for streaming state cache
 interface StreamingState {
@@ -164,6 +173,8 @@ export function useAgent(token?: string) {
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // HITL 审批：待处理的审批请求
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
 
   // Pagination state
   const [sessionOffset, setSessionOffset] = useState(0);
@@ -464,6 +475,18 @@ export function useAgent(token?: string) {
              );
              break;
 
+           case 'approval_requested':
+             // HITL: 危险工具等待用户审批 -> 展示审批卡片
+             setPendingApprovals(prev => [
+               ...prev,
+               {
+                 approval_id: event.approval_id || '',
+                 name: event.name || 'unknown_tool',
+                 arguments: event.arguments || {},
+               },
+             ]);
+             break;
+
           case 'done':
             {
               // Record answer end time
@@ -709,6 +732,22 @@ export function useAgent(token?: string) {
     isLoading,
     isStreaming,
     error,
+    pendingApprovals,
+    decideApproval: async (approvalId: string, approve: boolean) => {
+      try {
+        if (approve) {
+          await approveToolCall(approvalId, token);
+        } else {
+          await rejectToolCall(approvalId, token);
+        }
+        setPendingApprovals(prev =>
+          prev.filter(a => a.approval_id !== approvalId)
+        );
+      } catch (e) {
+        console.error('Approval decision failed:', e);
+        setError(e instanceof Error ? e.message : '审批操作失败');
+      }
+    },
     sendMessage,
     selectSession,
     refreshSessions,

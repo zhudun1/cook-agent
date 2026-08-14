@@ -62,6 +62,7 @@ CookHero 面向厨房新手、健身/减脂/控糖人群、健康饮食倡导者
 - **Grounding Truth 评测**：context_precision / context_recall / answer_correctness 离线批量评测与报告
 - **Harness 编排原语**：持久化 Goal（版本号乐观并发）、Todo 清单、结构化结果校验、后台作业、多阶段 workflow
 - **P0 安全防护**：成本熔断（token 预算）、人工介入审批（HITL）、工具权限矩阵、工具返回内容注入检测（纵深防御）
+- **P1 任务级评测**：工具级 SLO（成功率/延迟/P95）、黄金任务集端到端完成率、LLM 判定 + 启发式回退、回归拦截（基线对比）
 
 ## ✨ 核心功能
 

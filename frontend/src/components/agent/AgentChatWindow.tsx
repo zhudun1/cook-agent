@@ -7,6 +7,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Bot, Calculator, Code } from 'lucide-react';
 import type { Message } from '../../types';
 import { AgentMessageBubble } from './AgentMessageBubble';
+import { ApprovalCard } from './ApprovalCard';
+import type { PendingApproval } from '../../hooks/useAgent';
 
 export interface AgentChatWindowProps {
     messages: Message[];
@@ -14,9 +16,11 @@ export interface AgentChatWindowProps {
     onSuggestionClick?: (text: string) => void;
     error?: string | null;
     isToolSelectorOpen?: boolean;
+    pendingApprovals?: PendingApproval[];
+    onDecideApproval?: (approvalId: string, approve: boolean) => void;
 }
 
-export function AgentChatWindow({ messages, isLoading, onSuggestionClick, error, isToolSelectorOpen }: AgentChatWindowProps) {
+export function AgentChatWindow({ messages, isLoading, onSuggestionClick, error, isToolSelectorOpen, pendingApprovals, onDecideApproval }: AgentChatWindowProps) {
     messages = messages.filter(
         (message) =>
         (message.role === 'user' || message.role === 'assistant') && 
@@ -105,6 +109,19 @@ export function AgentChatWindow({ messages, isLoading, onSuggestionClick, error,
                     .map((message) => (
                         <AgentMessageBubble key={message.id} message={message} hasError={!!error} />
                     ))}
+
+                    {/* HITL 审批卡片：Agent 请求调用危险工具 */}
+                    {pendingApprovals && pendingApprovals.length > 0 && (
+                        <div className="space-y-2">
+                            {pendingApprovals.map((approval) => (
+                                <ApprovalCard
+                                    key={approval.approval_id}
+                                    approval={approval}
+                                    onDecide={onDecideApproval || (() => {})}
+                                />
+                            ))}
+                        </div>
+                    )}
 
                     {/* Loading indicator */}
                     {isLoading &&

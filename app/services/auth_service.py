@@ -58,8 +58,13 @@ class AuthService:
         if not self._redis:
             return False, 0
 
-        lockout_key = await self._get_lockout_key(username)
-        ttl = await self._redis.ttl(lockout_key)
+        try:
+            lockout_key = await self._get_lockout_key(username)
+            ttl = await self._redis.ttl(lockout_key)
+        except Exception as e:
+            # Redis 不可用：降级为不锁定（记录告警，避免登录路径崩溃）
+            logger.warning("Redis unavailable for lockout check, degraded: %s", e)
+            return False, 0
 
         if ttl > 0:
             return True, ttl
@@ -76,23 +81,31 @@ class AuthService:
         if not self._redis:
             return 0, False
 
-        failed_key = await self._get_failed_attempts_key(username)
-        lockout_key = await self._get_lockout_key(username)
+        try:
+            failed_key = await self._get_failed_attempts_key(username)
+            lockout_key = await self._get_lockout_key(username)
 
-        # Increment failed attempts
-        attempts = await self._redis.incr(failed_key)
+            # Increment failed attempts
+            attempts = await self._redis.incr(failed_key)
 
-        # Set expiry on the counter (reset after lockout period)
-        await self._redis.expire(failed_key, self.lockout_minutes * 60)
+            # Set expiry on the counter (reset after lockout period)
+            await self._redis.expire(failed_key, self.lockout_minutes * 60)
+        except Exception as e:
+            logger.warning("Redis unavailable for failed-attempt tracking, degraded: %s", e)
+            return 0, False
 
         # Check if we need to lock the account
         if attempts >= self.max_failed_attempts:
             # Lock the account
-            await self._redis.setex(
-                lockout_key,
-                self.lockout_minutes * 60,
-                "locked"
-            )
+            try:
+                await self._redis.setex(
+                    lockout_key,
+                    self.lockout_minutes * 60,
+                    "locked"
+                )
+            except Exception as e:
+                logger.warning("Redis unavailable for lockout, degraded: %s", e)
+                return attempts, False
             logger.warning(f"Account locked: {username} after {attempts} failed attempts")
             return attempts, True
 
@@ -103,10 +116,13 @@ class AuthService:
         if not self._redis:
             return
 
-        failed_key = await self._get_failed_attempts_key(username)
-        lockout_key = await self._get_lockout_key(username)
+        try:
+            failed_key = await self._get_failed_attempts_key(username)
+            lockout_key = await self._get_lockout_key(username)
 
-        await self._redis.delete(failed_key, lockout_key)
+            await self._redis.delete(failed_key, lockout_key)
+        except Exception as e:
+            logger.warning("Redis unavailable for attempt cleanup, degraded: %s", e)
 
     # ------------------------------------------------------------------
     # User retrieval helpers

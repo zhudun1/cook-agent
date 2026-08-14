@@ -27,7 +27,7 @@ export interface ConversationRequest {
 }
 
 export interface SSEEvent {
-  type: 'vision' | 'intent' | 'thinking' | 'text' | 'sources' | 'done' | 'session' | 'tool_call' | 'tool_result' | 'trace' | 'skill_load' | 'error';
+  type: 'vision' | 'intent' | 'thinking' | 'text' | 'sources' | 'done' | 'session' | 'tool_call' | 'tool_result' | 'trace' | 'skill_load' | 'approval_requested' | 'error';
   content?: string;
   data?: VisionInfo | IntentInfo | Source[] | string;
   conversation_id?: string;
@@ -47,6 +47,8 @@ export interface SSEEvent {
   success?: boolean;
   result?: unknown;
   error?: string;
+  // Approval (HITL) fields
+  approval_id?: string;
   // Timing fields
   thinking_duration_ms?: number;
   answer_duration_ms?: number;

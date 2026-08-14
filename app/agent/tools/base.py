@@ -273,7 +273,7 @@ class ToolExecutor:
         bypass_approval: bool = False,
     ) -> ToolResult:
         """
-        执行指定的 Tool（权限检查 + 审批 + 独立超时 + 注入净化）。
+        执行指定的 Tool（权限检查 + 审批 + 独立超时 + 注入净化 + SLO 采集）。
 
         Args:
             tool_name: Tool 名称
@@ -284,6 +284,37 @@ class ToolExecutor:
         Returns:
             ToolResult: 执行结果（失败时携带 error_code/retryable/suggestion）
         """
+        # P1 可观测性: 工具级 SLO 采集（计时 + 结果记录）
+        import time as _time
+
+        start = _time.monotonic()
+        result = await self._execute_inner(
+            tool_name, arguments, event_handler=event_handler,
+            bypass_approval=bypass_approval,
+        )
+        duration_ms = (_time.monotonic() - start) * 1000
+        try:
+            from app.evaluation.tool_metrics import tool_metrics
+
+            tool_metrics.record(
+                tool_name=tool_name,
+                success=result.success,
+                duration_ms=duration_ms,
+                error_code=result.error_code,
+                user_id=self.user_id,
+            )
+        except Exception:
+            pass
+        return result
+
+    async def _execute_inner(
+        self,
+        tool_name: str,
+        arguments: str | dict,
+        event_handler: Optional[Callable[[Any], Awaitable[None]]] = None,
+        bypass_approval: bool = False,
+    ) -> ToolResult:
+        """执行主体（权限检查 + 审批 + 超时 + 注入净化）。"""
         tool = self.tools.get(tool_name)
         if not tool:
             return ToolResult(

@@ -174,6 +174,39 @@ async def evaluation_health():
     }
 
 
+# =============================================================================
+# P1 可观测性: 工具级 SLO（成功率 / 延迟 / P95）
+# =============================================================================
+
+@router.get("/tool-metrics")
+async def get_tool_metrics(
+    request: Request,
+    tool: Optional[str] = Query(None, description="按工具名过滤"),
+    minutes: int = Query(60, ge=1, le=10080, description="统计最近 N 分钟"),
+):
+    """
+    工具调用 SLO 统计（成功率 / 平均延迟 / P50 / P95 / 错误码分布）。
+
+    **Parameters:**
+    - `tool`: 可选，只统计指定工具
+    - `minutes`: 统计窗口（分钟，默认 60）
+    """
+    from app.evaluation.tool_metrics import tool_metrics
+
+    since = None
+    if minutes:
+        import time as _time
+
+        since = _time.time() - minutes * 60
+
+    stats = tool_metrics.get_stats(tool_name=tool, since=since)
+    return {
+        "window_minutes": minutes,
+        "tool": tool,
+        "stats": stats,
+    }
+
+
 @router.get("/{evaluation_id}")
 async def get_evaluation_detail(
     request: Request,

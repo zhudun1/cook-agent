@@ -44,6 +44,8 @@ function ChatView() {
       sendMessage: agentSendMessage,
       selectSession: agentSelectSession,
       stopGeneration: agentStopGeneration,
+      pendingApprovals: agentPendingApprovals,
+      decideApproval: agentDecideApproval,
   } = useAgentContext();
 
   // Unified State based on Mode
@@ -116,6 +118,8 @@ function ChatView() {
              onSuggestionClick={handleSuggestionClick} 
              error={error}
              isToolSelectorOpen={isToolSelectorOpen}
+             pendingApprovals={agentPendingApprovals}
+             onDecideApproval={agentDecideApproval}
            />
           <div className="p-4 max-w-4xl w-full mx-auto">
             <AgentChatInput

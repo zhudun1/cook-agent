@@ -429,3 +429,74 @@ export async function deleteSubagent(
 
   return response.json();
 }
+
+// =============================================================================
+// P0 Security: HITL 审批 API
+// =============================================================================
+
+/**
+ * 批准工具调用
+ */
+export async function approveToolCall(
+  approvalId: string,
+  token?: string
+): Promise<{ message: string }> {
+  const response = await fetch(
+    `${API_BASE}/agent/approvals/${approvalId}/approve`,
+    {
+      method: 'POST',
+      headers: createJsonHeaders(token),
+    }
+  );
+
+  if (!response.ok) {
+    const msg = await parseErrorResponse(response);
+    throw new Error(msg || `HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * 拒绝工具调用
+ */
+export async function rejectToolCall(
+  approvalId: string,
+  token?: string
+): Promise<{ message: string }> {
+  const response = await fetch(
+    `${API_BASE}/agent/approvals/${approvalId}/reject`,
+    {
+      method: 'POST',
+      headers: createJsonHeaders(token),
+    }
+  );
+
+  if (!response.ok) {
+    const msg = await parseErrorResponse(response);
+    throw new Error(msg || `HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * 列出待审批请求
+ */
+export async function listPendingApprovals(
+  token?: string,
+  sessionId?: string
+): Promise<{ pending_approvals: Array<Record<string, unknown>> }> {
+  const params = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+  const response = await fetch(
+    `${API_BASE}/agent/approvals/pending${params}`,
+    { headers: createAuthHeaders(token) }
+  );
+
+  if (!response.ok) {
+    const msg = await parseErrorResponse(response);
+    throw new Error(msg || `HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+}
