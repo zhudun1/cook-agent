@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 # app/config/mcp_config.py
 """
 MCP (Model Context Protocol) configuration for CookHero.

@@ -146,7 +146,43 @@ class ContextCompressor:
 
             # Check if compression is needed
             trigger_threshold = self.compression_threshold + self.recent_messages_limit
-            if uncompressed_count < trigger_threshold:
+            count_trigger = uncompressed_count >= trigger_threshold
+
+            # Token-aware trigger: uncompressed messages exceed token budget ratio
+            # 解决长对话中单条消息过大但条数不多导致上下文爆炸的问题
+            token_trigger = False
+            try:
+                from app.config import settings
+                from app.llm.tokenizer import get_token_counter
+
+                budget = settings.tokenizer.token_budget
+                if budget > 0:
+                    token_history = await repository.get_history(
+                        conversation_id, limit=1000
+                    ) or []
+                    token_candidates = token_history[compressed_count:]
+                    if token_candidates:
+                        token_dicts = [
+                            {"role": h["role"], "content": h["content"]}
+                            for h in token_candidates
+                        ]
+                        tokens = get_token_counter().count_messages(token_dicts)
+                        threshold = int(
+                            budget * settings.tokenizer.compression_token_ratio
+                        )
+                        token_trigger = tokens > threshold
+                        if token_trigger:
+                            logger.info(
+                                "Token-based compression trigger for %s: "
+                                "uncompressed tokens=%d > threshold=%d",
+                                conversation_id,
+                                tokens,
+                                threshold,
+                            )
+            except Exception as e:
+                logger.debug("Token-based compression check failed: %s", e)
+
+            if not count_trigger and not token_trigger:
                 logger.debug(
                     "Compression not needed for %s: uncompressed=%d, threshold=%d",
                     conversation_id,

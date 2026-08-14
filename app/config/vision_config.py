@@ -1,10 +1,12 @@
+from __future__ import annotations
+
+
 """
 Vision Configuration
 Configures domain detection settings for vision analysis.
 Model configuration is now handled by LLMConfig.vision (VisionLLMConfig).
 """
 
-from __future__ import annotations
 
 from pydantic import BaseModel, Field
 

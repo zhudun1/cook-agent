@@ -52,6 +52,19 @@ from app.config.rag_config import (
 from app.config.web_search_config import WebSearchConfig
 from app.config.vision_config import VisionConfig, ImageGenerationConfig, ImageStorageConfig
 from app.config.mcp_config import MCPConfig, MCPServerConfig
+from app.config.tokenizer_config import TokenizerConfig
+from app.config.resilience_config import (
+    ResilienceConfig,
+    RetryConfig,
+    FallbackConfig,
+    ToolExecutionConfig,
+)
+from app.config.telemetry_config import (
+    TelemetryConfig,
+    TraceConfig,
+    StructuredLogConfig,
+    TrajectoryConfig,
+)
 
 __all__ = [
     # Main settings
@@ -85,6 +98,17 @@ __all__ = [
     # MCP configuration
     "MCPConfig",
     "MCPServerConfig",
+    # Tokenizer / Resilience / Telemetry configuration
+    "TokenizerConfig",
+    "ResilienceConfig",
+    "RetryConfig",
+    "FallbackConfig",
+    "ToolExecutionConfig",
+    "TelemetryConfig",
+    "TraceConfig",
+    "StructuredLogConfig",
+    "TrajectoryConfig",
+    # Image generation/storage configuration
     "ImageGenerationConfig",
     "ImageStorageConfig",
 ]

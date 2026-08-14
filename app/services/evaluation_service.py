@@ -105,6 +105,9 @@ class EvaluationService:
             from ragas.metrics import (
                 faithfulness,
                 answer_relevancy,
+                context_precision,
+                context_recall,
+                answer_correctness,
             )
             from ragas.llms import LangchainLLMWrapper
             from ragas.embeddings import LangchainEmbeddingsWrapper
@@ -129,22 +132,25 @@ class EvaluationService:
 
             self._embeddings = LangchainEmbeddingsWrapper(base_embeddings)
 
-            # Build metrics list based on config
-            # Note: context_precision and context_recall require 'reference' (ground truth)
-            # which is not available in real-time evaluation scenarios.
+            # Build metrics map
+            # Reference-free: faithfulness, answer_relevancy
+            # Reference-based (grounding truth): context_precision, context_recall,
+            # answer_correctness
             self._metrics_map = {
                 "faithfulness": faithfulness,
                 "answer_relevancy": answer_relevancy,
+                "context_precision": context_precision,
+                "context_recall": context_recall,
+                "answer_correctness": answer_correctness,
             }
 
-            self._metrics = [
-                self._metrics_map[m]
-                for m in self.config.metrics
-                if m in self._metrics_map
-            ]
+            # 全部可配置指标（reference 指标仅在提供 reference 数据时启用）
+            self._all_configured = list(
+                dict.fromkeys(self.config.metrics + self.config.ground_truth_metrics)
+            )
 
             # Configure metrics with LLM and embeddings
-            for metric in self._metrics:
+            for metric in self._metrics_map.values():
                 if hasattr(metric, "llm"):
                     metric.llm = self._llm
                 if hasattr(metric, "embeddings"):
@@ -153,7 +159,7 @@ class EvaluationService:
             self._ragas_initialized = True
             logger.info(
                 "RAGAS initialized with metrics: %s",
-                [m.name for m in self._metrics],
+                self._all_configured,
             )
 
         except ImportError as e:
@@ -178,6 +184,8 @@ class EvaluationService:
         query: str,
         context: str,
         response: str,
+        reference_answer: Optional[str] = None,
+        reference_contexts: Optional[List[str]] = None,
     ) -> Dict[str, float]:
         """
         Evaluate a single RAG response using RAGAS metrics.
@@ -186,6 +194,9 @@ class EvaluationService:
             query: Original user query
             context: Retrieved context used for generation
             response: Generated response
+            reference_answer: Ground truth answer（提供时启用 answer_correctness）
+            reference_contexts: Ground truth contexts（提供时启用
+                context_precision / context_recall）
 
         Returns:
             Dictionary of metric scores
@@ -200,13 +211,32 @@ class EvaluationService:
             # RAGAS expects contexts as a list of strings
             contexts = [context] if context else [""]
 
-            dataset = Dataset.from_dict(
-                {
-                    "question": [query],
-                    "answer": [response],
-                    "contexts": [contexts],
-                }
-            )
+            data = {
+                "question": [query],
+                "answer": [response],
+                "contexts": [contexts],
+            }
+            has_reference = bool(reference_answer) or bool(reference_contexts)
+            if reference_answer:
+                data["reference"] = [[reference_answer]]
+            if reference_contexts:
+                data["reference_contexts"] = [list(reference_contexts)]
+
+            dataset = Dataset.from_dict(data)
+
+            # Reference 指标仅在提供 grounding truth 时启用
+            if has_reference:
+                self._metrics = [
+                    self._metrics_map[m]
+                    for m in self._all_configured
+                    if m in self._metrics_map
+                ]
+            else:
+                self._metrics = [
+                    self._metrics_map[m]
+                    for m in self.config.metrics
+                    if m in self._metrics_map
+                ]
 
             # Run evaluation
             result = await asyncio.to_thread(
@@ -226,7 +256,8 @@ class EvaluationService:
                 score_list = result.scores  # type: ignore
                 if score_list and len(score_list) > 0:
                     first_score = score_list[0]
-                    for metric_name in self.config.metrics:
+                    for metric in self._metrics:
+                        metric_name = metric.name
                         if metric_name in first_score:
                             value = first_score[metric_name]
                             scores[metric_name] = (
@@ -237,7 +268,8 @@ class EvaluationService:
             elif hasattr(result, "to_pandas"):
                 # Alternative: use pandas DataFrame
                 df = result.to_pandas()  # type: ignore
-                for metric_name in self.config.metrics:
+                for metric in self._metrics:
+                    metric_name = metric.name
                     if metric_name in df.columns:
                         value = df[metric_name].iloc[0]
                         scores[metric_name] = (
@@ -247,7 +279,8 @@ class EvaluationService:
                         )
             else:
                 # Fallback: try direct dict-like access
-                for metric_name in self.config.metrics:
+                for metric in self._metrics:
+                    metric_name = metric.name
                     try:
                         # Try to access as attribute
                         if hasattr(result, metric_name):
@@ -283,6 +316,8 @@ class EvaluationService:
         response: str,
         rewritten_query: Optional[str] = None,
         user_id: Optional[str] = None,
+        reference_answer: Optional[str] = None,
+        reference_contexts: Optional[List[str]] = None,
     ):
         """
         Schedule an asynchronous evaluation for a RAG response.

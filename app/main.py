@@ -47,6 +47,14 @@ async def lifespan(app: FastAPI):
         )
         raise RuntimeError("JWT_SECRET_KEY must be configured for security")
 
+    # 结构化 JSON 日志（traceId 全链路）
+    try:
+        from app.telemetry.logger import configure_from_settings
+
+        configure_from_settings()
+    except Exception as e:
+        logger.warning("Failed to setup structured logging: %s", e)
+
     logger.info("Initializing database...")
     await init_db()
     logger.info("Database initialized.")
@@ -109,6 +117,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def trace_id_middleware(request: Request, call_next):
+    """
+    traceId 全链路追踪中间件。
+
+    读取上游 X-Trace-Id 请求头（无则自动生成），写入 contextvars，
+    使同一请求内所有 LLM 调用/工具调用/结构化日志共享同一个 traceId；
+    响应头回传 X-Trace-Id 便于前端/网关串联。
+    """
+    from app.telemetry.trace import set_trace_id, clear_trace_id
+
+    header_name = settings.telemetry.trace.header_name
+    trace_id = request.headers.get(header_name)
+    if not trace_id and settings.telemetry.trace.auto_generate:
+        import uuid
+
+        trace_id = uuid.uuid4().hex
+    if trace_id:
+        set_trace_id(trace_id)
+
+    response = await call_next(request)
+    response.headers[header_name] = trace_id or ""
+    clear_trace_id()
+    return response
 
 
 EXEMPT_PATHS = {

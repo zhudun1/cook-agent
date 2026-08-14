@@ -56,6 +56,11 @@ CookHero 面向厨房新手、健身/减脂/控糖人群、健康饮食倡导者
 - **评估与可观测性**：RAGAS 质量评估 + LLM 使用统计 + 可视化看板
 - **安全与合规**：提示词注入防护、速率限制、结构化审计日志
 - **现代化全栈**：FastAPI + React + PostgreSQL + Milvus + Redis + MinIO
+- **Token 智能上下文**：tiktoken 实时计数 + 滑动窗口截断 + token 感知摘要压缩，解决长对话记忆退化
+- **LLM 韧性调用**：指数退避重试 + 模型降级切换 + 工具独立超时与结构化错误，Agent 可自主决策恢复路径
+- **全链路可观测**：traceId 串联推理→工具→回答，Agent turn 轨迹 JSON 持久化支持回放调试，配置 YAML 外部化
+- **Grounding Truth 评测**：context_precision / context_recall / answer_correctness 离线批量评测与报告
+- **Harness 编排原语**：持久化 Goal（版本号乐观并发）、Todo 清单、结构化结果校验、后台作业、多阶段 workflow
 
 ## ✨ 核心功能
 

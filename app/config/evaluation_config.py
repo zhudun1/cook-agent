@@ -1,6 +1,14 @@
+from __future__ import annotations
+
+
 # app/config/evaluation_config.py
 """
 Configuration for RAG evaluation using RAGAS framework.
+
+支持两类评测：
+1. 在线评估（实时）：faithfulness / answer_relevancy（无需 ground truth）
+2. 离线评测（grounding truth）：context_precision / context_recall / answer_correctness，
+   基于测试集（question + reference_contexts + reference_answer）
 """
 
 from dataclasses import dataclass, field
@@ -12,6 +20,9 @@ class AlertThresholds:
     """Thresholds for quality alerts. Evaluations below these values trigger alerts."""
     faithfulness: float = 0.3
     answer_relevancy: float = 0.5
+    context_precision: float = 0.3
+    context_recall: float = 0.3
+    answer_correctness: float = 0.3
 
 
 @dataclass
@@ -27,15 +38,18 @@ class EvaluationConfig:
         llm_type: LLM tier to use for evaluation (fast recommended for cost)
         timeout_seconds: Timeout for evaluation
         alert_thresholds: Thresholds for quality alerts
+        testsets_dir: Directory containing grounding-truth testsets (.jsonl)
+        ground_truth_metrics: Reference-based metrics for offline evaluation
+        report_dir: Output directory for offline evaluation reports
+        max_question_chars: Max length of a question in testsets
     """
     enabled: bool = True
     async_mode: bool = True
     sample_rate: float = 1.0
 
     # RAGAS metrics to compute
-    # Note: context_precision and context_recall require 'reference' (ground truth)
-    # which is not available in real-time evaluation scenarios.
-    # Only faithfulness and answer_relevancy work without reference.
+    # Reference-free: faithfulness, answer_relevancy
+    # Reference-based (grounding truth): context_precision, context_recall, answer_correctness
     metrics: List[str] = field(default_factory=lambda: [
         "faithfulness",
         "answer_relevancy",
@@ -49,6 +63,18 @@ class EvaluationConfig:
 
     # Alert thresholds
     alert_thresholds: AlertThresholds = field(default_factory=AlertThresholds)
+
+    # ------------------------------------------------------------------
+    # Grounding truth (offline evaluation)
+    # ------------------------------------------------------------------
+    testsets_dir: str = "testsets"
+    ground_truth_metrics: List[str] = field(default_factory=lambda: [
+        "context_precision",
+        "context_recall",
+        "answer_correctness",
+    ])
+    report_dir: str = "data/evaluation_reports"
+    max_question_chars: int = 2000
 
     def should_evaluate(self) -> bool:
         """Check if evaluation should be performed based on sampling."""

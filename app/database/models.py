@@ -274,6 +274,10 @@ class RAGEvaluationModel(Base):
     context: Mapped[str] = mapped_column(Text, nullable=False)
     response: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # Grounding truth（离线评测）
+    reference_answer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reference_contexts: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+
     # Retrieval quality metrics
     context_precision: Mapped[Optional[float]] = mapped_column(nullable=True)
     context_recall: Mapped[Optional[float]] = mapped_column(nullable=True)
@@ -281,6 +285,7 @@ class RAGEvaluationModel(Base):
     # Generation quality metrics
     faithfulness: Mapped[Optional[float]] = mapped_column(nullable=True)
     answer_relevancy: Mapped[Optional[float]] = mapped_column(nullable=True)
+    answer_correctness: Mapped[Optional[float]] = mapped_column(nullable=True)
 
     # Evaluation metadata
     evaluation_status: Mapped[str] = mapped_column(
@@ -319,7 +324,9 @@ class RAGEvaluationModel(Base):
                 "context_recall": self.context_recall,
                 "faithfulness": self.faithfulness,
                 "answer_relevancy": self.answer_relevancy,
+                "answer_correctness": self.answer_correctness,
             },
+            "reference_answer": self.reference_answer,
             "evaluation_status": self.evaluation_status,
             "error_message": self.error_message,
             "evaluation_duration_ms": self.evaluation_duration_ms,

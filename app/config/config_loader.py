@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 # app/config/config_loader.py
 """
 Configuration loader for CookHero.
@@ -28,6 +31,9 @@ from app.config.web_search_config import WebSearchConfig
 from app.config.vision_config import VisionConfig, ImageGenerationConfig, ImageStorageConfig
 from app.config.evaluation_config import EvaluationConfig, AlertThresholds
 from app.config.mcp_config import MCPConfig, MCPServerConfig
+from app.config.tokenizer_config import TokenizerConfig
+from app.config.resilience_config import ResilienceConfig
+from app.config.telemetry_config import TelemetryConfig
 
 
 # Load .env file into environment variables at module import
@@ -240,6 +246,14 @@ def load_evaluation_config() -> EvaluationConfig:
         llm_type=eval_data.get("llm_type", "fast"),
         timeout_seconds=eval_data.get("timeout_seconds", 60),
         alert_thresholds=eval_data.get("alert_thresholds", AlertThresholds()),
+        testsets_dir=eval_data.get("testsets_dir", "testsets"),
+        ground_truth_metrics=eval_data.get("ground_truth_metrics", [
+            "context_precision",
+            "context_recall",
+            "answer_correctness",
+        ]),
+        report_dir=eval_data.get("report_dir", "data/evaluation_reports"),
+        max_question_chars=eval_data.get("max_question_chars", 2000),
     )
 
 
@@ -300,3 +314,36 @@ def load_image_storage_config() -> ImageStorageConfig:
         is_data["api_key"] = api_key
 
     return ImageStorageConfig.model_validate(is_data)
+
+
+def load_tokenizer_config() -> TokenizerConfig:
+    """
+    Load tokenizer/sliding-window configuration from YAML.
+
+    Section: tokenizer
+    """
+    config_data = _load_config_data()
+    data = dict(config_data.get("tokenizer", {}) or {})
+    return TokenizerConfig.model_validate(data)
+
+
+def load_resilience_config() -> ResilienceConfig:
+    """
+    Load LLM resilience configuration from YAML.
+
+    Section: resilience (retry / fallback / tools)
+    """
+    config_data = _load_config_data()
+    data = dict(config_data.get("resilience", {}) or {})
+    return ResilienceConfig.model_validate(data)
+
+
+def load_telemetry_config() -> TelemetryConfig:
+    """
+    Load telemetry configuration from YAML.
+
+    Section: telemetry (trace / structured_log / trajectory)
+    """
+    config_data = _load_config_data()
+    data = dict(config_data.get("telemetry", {}) or {})
+    return TelemetryConfig.model_validate(data)

@@ -171,7 +171,7 @@ class AgentContextBuilder:
 
     def build_messages(self, context: AgentContext) -> list[dict]:
         """
-        从上下文构建 LLM 输入消息列表。
+        从上下文构建 LLM 输入消息列表（token 预算滑动窗口截断）。
 
         Args:
             context: Agent 上下文
@@ -179,7 +179,8 @@ class AgentContextBuilder:
         Returns:
             消息列表（符合 OpenAI 格式）
         """
-        messages = []
+        from app.llm.window import ContextWindow
+        from app.config import settings
 
         # 1. System prompt（含用户画像和指令）
         system_content = context.system_prompt
@@ -193,44 +194,28 @@ class AgentContextBuilder:
         if context.user_instruction:
             system_content += f"\n\n## 用户指令\n{context.user_instruction}"
 
-        messages.append({"role": "system", "content": system_content})
-
         # 2. 历史摘要
-        if context.history_summary:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": f"## 历史对话摘要\n{context.history_summary}",
-                }
-            )
+        history_summary = context.history_summary
 
-        # 3. 近期消息
-        messages.extend(context.recent_messages)
+        # 3. 近期消息（滑动窗口截断：旧消息优先丢弃）
+        history = list(context.recent_messages or [])
 
         # 4. 当前消息（可能包含图片）
         if context.images:
-            # Build multimodal content with images
-            content_parts = []
-            content_parts.append(
-                {
-                    "type": "text",
-                    "text": context.current_message,
-                }
-            )
-
-            # Add image content
+            content_parts = [
+                {"type": "text", "text": context.current_message},
+            ]
             for img in context.images:
                 if img.get("url"):
-                    # Use imgbb URL
                     content_parts.append(
                         {"type": "image_url", "image_url": {"url": img["url"]}}
                     )
-
-            messages.append({"role": "user", "content": content_parts})
+            current_msg: dict = {"role": "user", "content": content_parts}
         else:
-            # Plain text message
-            messages.append({"role": "user", "content": context.current_message})
+            current_msg = {"role": "user", "content": context.current_message}
 
+        # 5. Vision tool messages（若有）
+        suffix_messages = [current_msg]
         if context.vision_analysis and context.vision_tool_call_id:
             tool_call = {
                 "id": context.vision_tool_call_id,
@@ -243,14 +228,10 @@ class AgentContextBuilder:
                     ),
                 },
             }
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [tool_call],
-                }
+            suffix_messages.append(
+                {"role": "assistant", "content": None, "tool_calls": [tool_call]}
             )
-            messages.append(
+            suffix_messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": context.vision_tool_call_id,
@@ -263,6 +244,23 @@ class AgentContextBuilder:
                 }
             )
 
+        # 6. 滑动窗口组装（token 预算）
+        window = ContextWindow(token_budget=settings.tokenizer.token_budget)
+        messages, stats = window.build(
+            system_prompt=system_content,
+            history_summary=history_summary,
+            history=history,
+            current_message=context.current_message,
+            extra_system=None,
+        )
+
+        # 替换窗口中的当前消息为完整消息（含图片/vision 结构）
+        # window.build 以纯文本 current_message 兜底，这里用完整结构替换最后一条 user 消息
+        if messages and messages[-1].get("role") == "user":
+            messages[-1] = current_msg
+        messages.extend(suffix_messages[1:])  # 追加 vision 消息（当前消息已在上面替换）
+
+        context.window_stats = stats.to_dict()
         return messages
 
 
@@ -319,8 +317,42 @@ class AgentContextCompressor:
 
         uncompressed_count = total_count - compressed_count
 
+        # 触发条件 1：未压缩消息条数超阈值（原有规则）
+        count_trigger = (
+            uncompressed_count >= self.compression_threshold + self.recent_messages_limit
+        )
+
+        # 触发条件 2（token 感知）：未压缩消息估算 token 超预算
+        # 解决长对话中"单条消息很大但条数不多"导致上下文爆炸的问题
+        token_trigger = False
+        try:
+            from app.config import settings
+            from app.llm.tokenizer import get_token_counter
+
+            budget = settings.tokenizer.token_budget
+            if budget > 0:
+                uncompressed_messages = await repository.get_recent_messages(
+                    session_id,
+                    skip=compressed_count,
+                    limit=1000,
+                )
+                if uncompressed_messages:
+                    tokens = get_token_counter().count_messages(uncompressed_messages)
+                    threshold = int(budget * settings.tokenizer.compression_token_ratio)
+                    token_trigger = tokens > threshold
+                    if token_trigger:
+                        logger.info(
+                            "Token-based compression trigger for session %s: "
+                            "uncompressed tokens=%d > threshold=%d",
+                            session_id,
+                            tokens,
+                            threshold,
+                        )
+        except Exception as e:
+            logger.debug("Token-based compression check failed: %s", e)
+
         # 检查是否需要压缩
-        if uncompressed_count < self.compression_threshold + self.recent_messages_limit:
+        if not count_trigger and not token_trigger:
             return False
 
         # 获取需要压缩的消息

@@ -34,6 +34,8 @@ class EvaluationRepository:
         rewritten_query: Optional[str] = None,
         user_id: Optional[str] = None,
         created_at: Optional[datetime] = None,
+        reference_answer: Optional[str] = None,
+        reference_contexts: Optional[List[str]] = None,
     ) -> RAGEvaluationModel:
         """
         Create a new evaluation record with pending status.
@@ -47,6 +49,8 @@ class EvaluationRepository:
             rewritten_query: Rewritten query (if any)
             user_id: User ID (if available)
             created_at: Optional creation time override (defaults to now)
+            reference_answer: Ground truth answer（离线评测）
+            reference_contexts: Ground truth contexts（离线评测）
 
         Returns:
             Created RAGEvaluationModel instance
@@ -61,6 +65,8 @@ class EvaluationRepository:
                 rewritten_query=rewritten_query,
                 context=context,
                 response=response,
+                reference_answer=reference_answer,
+                reference_contexts=reference_contexts,
                 evaluation_status="pending",
                 created_at=created_at or datetime.utcnow(),
             )
@@ -109,9 +115,12 @@ class EvaluationRepository:
                 logger.warning("Evaluation not found: %s", evaluation_id)
                 return False
 
-            # Update metrics
+            # Update metrics（含 grounding truth 指标）
             evaluation.faithfulness = results.get("faithfulness")
             evaluation.answer_relevancy = results.get("answer_relevancy")
+            evaluation.context_precision = results.get("context_precision")
+            evaluation.context_recall = results.get("context_recall")
+            evaluation.answer_correctness = results.get("answer_correctness")
 
             # Update metadata
             evaluation.evaluation_status = status

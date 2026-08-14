@@ -101,6 +101,26 @@ class ContextManager:
         # Get uncompressed messages (messages not yet summarized)
         uncompressed_messages = history[compressed_count:]
         
+        # 滑动窗口截断：token 预算内保留最近的未压缩消息，旧消息从旧到新丢弃
+        # system/摘要消息永不丢弃；extra_prompt（如 RAG 上下文）也保留
+        from app.config import settings
+        from app.llm.tokenizer import get_token_counter
+
+        budget = getattr(settings.tokenizer, "token_budget", 16000)
+        windowed = get_token_counter().fit_in_budget(
+            uncompressed_messages,
+            budget,
+            keep_first=0,
+        )
+        if len(windowed) < len(uncompressed_messages):
+            logger = __import__("logging").getLogger(__name__)
+            logger.info(
+                "ContextManager sliding window truncated %d messages (budget=%d)",
+                len(uncompressed_messages) - len(windowed),
+                budget,
+            )
+        uncompressed_messages = windowed
+
         # Add uncompressed messages
         for msg in uncompressed_messages:
             role = msg.get("role", "")

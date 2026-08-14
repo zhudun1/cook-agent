@@ -37,3 +37,8 @@ CODEBUDDY.md
 logs/
 blog/
 .ignore
+# Telemetry / Harness runtime artifacts
+/data/trajectories/
+/data/harness/
+/data/logs/
+/data/evaluation_reports/

@@ -174,7 +174,8 @@ evaluation:
   # 1.0 = evaluate all requests, 0.1 = evaluate 10% of requests
   sample_rate: 1.0
   # RAGAS metrics to compute
-  # Available: "faithfulness", "answer_relevancy", "context_precision", "context_recall"
+  # Available: "faithfulness", "answer_relevancy", "context_precision", "context_recall",
+  #            "answer_correctness" (grounding truth 指标，需要 reference)
   metrics:
     - "faithfulness"
     - "answer_relevancy"
@@ -186,6 +187,21 @@ evaluation:
   alert_thresholds:
     faithfulness: 0.3
     answer_relevancy: 0.5
+  # ---------------------------------------------------------------------------
+  # Grounding Truth 评测（离线批量评测）
+  # ---------------------------------------------------------------------------
+  # testsets_dir: 评测数据集目录，每个 .jsonl 文件为一个测试集，行格式:
+  #   {"question": "...", "reference_contexts": ["..."], "reference_answer": "..."}
+  testsets_dir: "testsets"
+  # 启用 grounding truth 相关指标（context_precision/context_recall/answer_correctness）
+  ground_truth_metrics:
+    - "context_precision"
+    - "context_recall"
+    - "answer_correctness"
+  # 离线评测默认输出报告目录
+  report_dir: "data/evaluation_reports"
+  # 单条 question 的最长字符数（防异常长输入）
+  max_question_chars: 2000
 
 # =============================================================================
 # 7. Web Search Configuration (Tavily)
@@ -296,3 +312,94 @@ paths:
 
 blank_issues_enabled: true
 contact_links: []
+
+# =============================================================================
+# 14. Tokenizer & Sliding Window Configuration
+# =============================================================================
+# tiktoken 实时 Token 计数 + 滑动窗口截断 + token 感知的摘要压缩。
+# 用于解决长对话场景下的记忆退化问题。
+# =============================================================================
+
+tokenizer:
+  # 用于选择 tiktoken 编码器的模型名（仅影响编码器选择，非实际调用模型）
+  model: "gpt-4o"
+  # 显式指定编码器名（优先于 model）；不填则按 model 推断
+  # encoding_name: "o200k_base"
+  # 单次 LLM 请求的 token 预算（滑动窗口上限，system/摘要永不丢弃，旧消息从旧到新截断）
+  token_budget: 16000
+  # 触发摘要压缩的 token 阈值系数：未压缩消息估算 token > token_budget * ratio 时触发压缩
+  compression_token_ratio: 0.8
+  # 压缩后至少保留的未压缩消息条数
+  min_uncompressed_messages: 6
+
+# =============================================================================
+# 15. LLM Resilience Configuration
+# =============================================================================
+# 指数退避重试、模型降级切换、工具调用独立超时与结构化错误返回。
+# =============================================================================
+
+resilience:
+  retry:
+    # 每个模型的最大重试次数（指数退避）
+    max_retries: 3
+    # 首次退避延迟（秒），之后按 exponential_factor 指数增长，带抖动
+    base_delay_seconds: 1.0
+    max_delay_seconds: 30.0
+    exponential_factor: 2.0
+    jitter: true
+    # 可重试的异常关键字（匹配异常类名或消息）
+    retryable_errors:
+      - "TimeoutError"
+      - "APITimeoutError"
+      - "RateLimitError"
+      - "ServiceUnavailableError"
+      - "InternalServerError"
+      - "BadGatewayError"
+      - "ConnectionError"
+  fallback:
+    # 是否启用模型降级
+    enabled: true
+    # 同一 profile 内 model_names 列表逐个重试（先负载均衡后降级）
+    retry_models_within_profile: true
+    # 跨层降级链：fast 全失败 -> normal，normal 全失败 -> vision
+    fallback_llm_types: ["fast", "normal", "vision"]
+    # 最大降级步数
+    max_fallback_steps: 2
+  tools:
+    # 单个工具的默认超时（秒），0 表示不限制
+    default_timeout_seconds: 30.0
+    # 工具级超时覆盖（tool_name -> seconds）
+    timeout_overrides:
+      # 示例：web_search 单独给 45 秒
+      # web_search: 45.0
+      image_generator: 90.0
+
+# =============================================================================
+# 16. Telemetry Configuration
+# =============================================================================
+# traceId 全链路结构化日志 + Agent turn 轨迹 JSON 持久化（支持回放调试）。
+# =============================================================================
+
+telemetry:
+  trace:
+    enabled: true
+    # 从 HTTP 请求头读取 traceId 的字段名（便于与网关/SIEM 联动）
+    header_name: "X-Trace-Id"
+    # 无上游 traceId 时自动生成
+    auto_generate: true
+  structured_log:
+    enabled: true
+    # JSON 行日志文件路径（None 则仅 stdlib logging）
+    file_path: "data/logs/cookhero.jsonl"
+    level: "INFO"
+    # 日志中需要脱敏的字段名（递归）
+    sensitive_fields: ["api_key", "token", "password", "authorization"]
+  trajectory:
+    enabled: true
+    # Agent turn 轨迹 JSON 落盘目录（支持回放调试）
+    storage_dir: "data/trajectories"
+    # 是否同时写入数据库
+    persist_to_db: false
+    # 是否记录完整输入/输出（关闭时截断 content）
+    record_full_payload: true
+    max_payload_chars: 20000

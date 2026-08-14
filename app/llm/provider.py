@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 LLM Provider - 统一的 LLM 初始化和调用入口
 
@@ -6,7 +8,6 @@ LLM Provider - 统一的 LLM 初始化和调用入口
 2. LLMInvoker - LLM 调用器，封装了调用逻辑和 usage tracking
 """
 
-from __future__ import annotations
 
 import random
 from typing import Any, AsyncIterator, List, Optional
@@ -147,6 +148,10 @@ class LLMProvider:
             llm_type=llm_type,
             base_llm=base_llm,
             callbacks=get_usage_callbacks(),
+            streaming=streaming,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            extra_kwargs=kwargs,
         )
 
 
@@ -160,6 +165,7 @@ class LLMInvoker:
     - 支持动态模型选择（每次调用可选择不同模型）
     - 支持 tool calling
     - 支持流式输出
+    - 韧性调用：指数退避重试 + 模型降级切换（配置见 config.yml resilience 段）
 
     使用方式:
         # 普通调用
@@ -179,11 +185,43 @@ class LLMInvoker:
         llm_type: LLMType | str | None,
         base_llm: ChatOpenAI,
         callbacks: List[BaseCallbackHandler] | None = None,
+        *,
+        streaming: bool = False,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        extra_kwargs: dict | None = None,
     ):
         self._provider = provider
         self._llm_type = llm_type
         self._base_llm = base_llm
         self._callbacks = callbacks or []
+        # 记录创建参数，用于模型降级时重建 LLM 实例
+        self._streaming = streaming
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._extra_kwargs = dict(extra_kwargs or {})
+
+    # ------------------------------------------------------------------
+    # LLM 实例构建
+    # ------------------------------------------------------------------
+    def _make_llm(
+        self,
+        model: str,
+        llm_type: LLMType | str | None = None,
+        tools: list[Any] | None = None,
+    ) -> ChatOpenAI:
+        """按指定模型/层级构建 LLM 实例（支持降级重建）。"""
+        llm = self._provider.create_llm(
+            llm_type or self._llm_type,
+            streaming=self._streaming,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+            **self._extra_kwargs,
+        )
+        llm = llm.bind(model=model)  # type: ignore
+        if tools:
+            llm = llm.bind(tools=tools)  # type: ignore
+        return llm  # type: ignore
 
     def _get_llm_with_model(self, tools: list[Any] | None = None) -> ChatOpenAI:
         """
@@ -192,12 +230,7 @@ class LLMInvoker:
         每次调用都会随机选择一个模型，实现负载均衡
         """
         model = self._provider.pick_model(self._llm_type)
-        llm = self._base_llm.bind(model=model)
-
-        if tools:
-            llm = llm.bind(tools=tools)  # type: ignore
-
-        return llm  # type: ignore
+        return self._make_llm(model, self._llm_type, tools)
 
     def _prepare_config(self, kwargs: dict) -> dict:
         """准备调用配置，合并 callbacks"""
@@ -216,30 +249,164 @@ class LLMInvoker:
             kwargs["config"] = {"callbacks": merged}
 
         return kwargs
-    
+
+    # ------------------------------------------------------------------
+    # 韧性事件上报（接入 telemetry）
+    # ------------------------------------------------------------------
+    def _on_resilience_event(self, event: Any) -> None:
+        """韧性层事件回调：写入结构化日志。"""
+        try:
+            from app.telemetry.logger import log_structured_event
+
+            log_structured_event(
+                "llm_resilience",
+                event.to_dict(),
+            )
+        except Exception:
+            pass
+
+    def _resilience_config(self):
+        from app.config import settings
+
+        return settings.resilience
+
+    def _build_fallback_plan(self):
+        """构建降级链与各层模型名。"""
+        from app.llm.resilience import build_llm_type_chain
+
+        cfg = self._resilience_config()
+        chain = build_llm_type_chain(self._llm_type, cfg)
+        model_names = {
+            t: self._provider.get_profile(t).model_names or []
+            for t in chain
+        }
+        return cfg, chain, model_names
+
+    # ------------------------------------------------------------------
+    # 非流式调用（带重试 + 降级）
+    # ------------------------------------------------------------------
     async def ainvoke(self, messages: list, **kwargs: Any) -> Any:
-        """异步调用 LLM"""
+        """异步调用 LLM（指数退避重试 + 模型降级）。"""
         kwargs = self._prepare_config(kwargs)
-        return await self._get_llm_with_model().ainvoke(messages, **kwargs)
+        return await self._invoke_resilient(messages, tools=None, **kwargs)
 
     async def ainvoke_with_tools(
         self, messages: list, tools: list, **kwargs: Any
     ) -> Any:
-        """异步调用 LLM（带 tools）"""
+        """异步调用 LLM（带 tools，含重试 + 降级）。"""
         kwargs = self._prepare_config(kwargs)
-        return await self._get_llm_with_model(tools=tools).ainvoke(messages, **kwargs)
+        return await self._invoke_resilient(messages, tools=tools, **kwargs)
 
+    async def _invoke_resilient(
+        self,
+        messages: list,
+        tools: list | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """韧性调用的统一实现。"""
+        from app.llm.resilience import call_with_fallback
+
+        cfg, chain, model_names = self._build_fallback_plan()
+
+        # 未启用韧性：直接调用（随机模型负载均衡）
+        if not cfg.fallback.enabled and cfg.retry.max_retries == 0:
+            return await self._get_llm_with_model(tools=tools).ainvoke(
+                messages, **kwargs
+            )
+
+        async def call(llm_type: str, model: str) -> Any:
+            llm = self._make_llm(model, llm_type, tools)
+            return await llm.ainvoke(messages, **kwargs)
+
+        return await call_with_fallback(
+            call,
+            chain,
+            model_names,
+            cfg,
+            on_event=self._on_resilience_event,
+        )
+
+    # ------------------------------------------------------------------
+    # 流式调用（首块前重试，出流后不重试避免内容重复）
+    # ------------------------------------------------------------------
     def astream(self, messages: list, **kwargs: Any) -> AsyncIterator[Any]:
-        """流式调用 LLM"""
+        """流式调用 LLM（仅首块前失败会重试）。"""
         kwargs = self._prepare_config(kwargs)
-        return self._get_llm_with_model().astream(messages, **kwargs)
+        return self._astream_resilient(messages, tools=None, **kwargs)
 
     async def astream_with_tools(
         self, messages: list, tools: list, **kwargs: Any
     ) -> AsyncIterator[Any]:
-        """流式调用 LLM（带 tools）"""
+        """流式调用 LLM（带 tools，仅首块前失败会重试）。"""
         kwargs = self._prepare_config(kwargs)
-        async for chunk in self._get_llm_with_model(tools=tools).astream(
-            messages, **kwargs
-        ):
+        async for chunk in self._astream_resilient(messages, tools=tools, **kwargs):
             yield chunk
+
+    async def _astream_resilient(
+        self,
+        messages: list,
+        tools: list | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        from app.llm.resilience import async_retry, LLMResilienceError
+
+        cfg, chain, model_names = self._build_fallback_plan()
+
+        if not cfg.fallback.enabled and cfg.retry.max_retries == 0:
+            async for chunk in self._get_llm_with_model(tools=tools).astream(
+                messages, **kwargs
+            ):
+                yield chunk
+            return
+
+        # 打开流并消费首个 chunk（HTTP 请求在此触发，失败可重试/降级）
+        # 首块之后不再重试，避免 SSE 内容重复
+        async def open_and_first(llm_type: str, model: str):
+            stream = self._make_llm(model, llm_type, tools).astream(messages, **kwargs)
+            iterator = stream.__aiter__()
+            try:
+                first = await iterator.__anext__()
+            except StopAsyncIteration:
+                return iterator, None
+            return iterator, first
+
+        fallback_steps = 0
+        last_err: BaseException | None = None
+
+        for llm_type in chain:
+            models = model_names.get(llm_type) or []
+            for model in models:
+                try:
+                    iterator, first = await async_retry(
+                        lambda t=llm_type, m=model: open_and_first(t, m),
+                        cfg.retry,
+                        on_event=self._on_resilience_event,
+                        llm_type=llm_type,
+                        model=model,
+                    )
+                    if first is not None:
+                        yield first
+                    async for chunk in iterator:
+                        yield chunk
+                    return
+                except LLMResilienceError as e:
+                    last_err = e
+                    # 模型降级
+                except Exception as e:
+                    # 流中途失败：不重试（已产生部分输出）
+                    raise
+
+            fallback_steps += 1
+            if fallback_steps >= cfg.fallback.max_fallback_steps:
+                break
+
+        if isinstance(last_err, LLMResilienceError):
+            raise last_err
+        raise LLMResilienceError(
+            "Streaming LLM call failed after all fallbacks",
+            error_type=type(last_err).__name__ if last_err else "Unknown",
+            retryable=False,
+            attempts=1,
+            models_tried=[],
+            cause=last_err,
+        )

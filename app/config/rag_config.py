@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 # app/config/rag_config.py
 """
 RAG (Retrieval-Augmented Generation) configuration models.

@@ -2,8 +2,16 @@
 Tool 基类和辅助类
 
 Tool 是 Agent 可以调用的外部功能，如搜索、计算、API 调用等。
+
+结构化错误设计（供 Agent 自主决策恢复路径）:
+- 每个失败返回 ToolResult 携带 error_code / retryable / suggestion
+- error_code: TIMEOUT | TOOL_ERROR | VALIDATION_ERROR | AUTH_ERROR |
+              NOT_FOUND | RATE_LIMITED | UNKNOWN
+- retryable: True 表示 Agent 可稍后重试（如限流/超时/瞬时故障）
+- suggestion: 给 LLM 的自然语言恢复建议
 """
 
+import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -14,6 +22,31 @@ from pydantic import BaseModel
 from app.agent.types import ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def classify_tool_error(exc: BaseException) -> tuple[str, bool, Optional[str]]:
+    """
+    将异常分类为结构化错误信息。
+
+    Returns:
+        (error_code, retryable, suggestion)
+    """
+    exc_name = type(exc).__name__
+    exc_msg = str(exc).lower()
+
+    if isinstance(exc, asyncio.TimeoutError) or "timeout" in exc_name.lower():
+        return "TIMEOUT", True, "工具执行超时，可稍后重试或拆分请求"
+    if "rate" in exc_msg or "429" in exc_msg:
+        return "RATE_LIMITED", True, "触发限流，请稍后重试或降低调用频率"
+    if any(k in exc_name.lower() for k in ("auth", "unauthorized", "forbidden", "apikey", "api_key")):
+        return "AUTH_ERROR", False, "认证失败，请检查 API Key 或权限配置"
+    if "not found" in exc_msg or "404" in exc_msg or exc_name == "KeyError":
+        return "NOT_FOUND", False, "目标资源不存在，请检查参数或改用其他工具"
+    if any(k in exc_name.lower() for k in ("validation", "valueerror", "typeerror", "jsondecode")):
+        return "VALIDATION_ERROR", False, "参数或返回格式不合法，请修正调用参数"
+    if any(k in exc_name.lower() for k in ("connection", "serviceunavailable", "badgateway", "internalserver")):
+        return "TOOL_ERROR", True, "服务暂时不可用，可稍后重试"
+    return "TOOL_ERROR", False, "工具执行失败，请检查参数或改用其他工具"
 
 
 class BaseTool(ABC):
@@ -56,22 +89,57 @@ class BaseTool(ABC):
 
     async def safe_execute(self, **kwargs) -> ToolResult:
         """
-        安全执行 Tool，捕获异常。
+        安全执行 Tool，捕获异常并返回结构化错误。
 
         Args:
             **kwargs: Tool 参数
 
         Returns:
-            ToolResult: 执行结果
+            ToolResult: 执行结果（失败时携带 error_code/retryable/suggestion）
         """
         try:
-            return await self.execute(**kwargs)
+            result = await self.execute(**kwargs)
+            # 归一化：execute 可能返回 dict / ToolResult
+            if isinstance(result, ToolResult):
+                if not result.success and result.error_code is None:
+                    code, retryable, suggestion = classify_tool_error(
+                        RuntimeError(result.error or "Tool failed")
+                    )
+                    result.error_code = code
+                    result.retryable = retryable
+                    result.suggestion = suggestion
+                return result
+            if isinstance(result, dict):
+                success = result.get("success", True)
+                if not success and result.get("error"):
+                    code, retryable, suggestion = classify_tool_error(
+                        RuntimeError(result["error"])
+                    )
+                    result.setdefault("error_code", code)
+                    result.setdefault("retryable", retryable)
+                    result.setdefault("suggestion", suggestion)
+                return ToolResult(**result)
+            return ToolResult(success=True, data=result)
+        except asyncio.TimeoutError as e:
+            logger.exception(f"Tool {self.name} timed out: {e}")
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Tool {self.name} timed out",
+                error_code="TIMEOUT",
+                retryable=True,
+                suggestion="工具执行超时，可稍后重试或简化请求",
+            )
         except Exception as e:
             logger.exception(f"Tool {self.name} execution failed: {e}")
+            code, retryable, suggestion = classify_tool_error(e)
             return ToolResult(
                 success=False,
                 data=None,
                 error=str(e),
+                error_code=code,
+                retryable=retryable,
+                suggestion=suggestion,
             )
 
     def to_openai_schema(self) -> dict:
@@ -169,6 +237,7 @@ class ToolExecutor:
     Tool 执行器。
 
     负责执行 Tool 调用并返回结果。
+    支持每个工具独立超时（默认/覆盖配置，见 config.yml resilience.tools）。
     """
 
     def __init__(self, tools: dict[str, BaseTool], user_id: Optional[str] = None):
@@ -182,6 +251,20 @@ class ToolExecutor:
         self.tools = tools
         self.user_id = user_id
 
+    def _timeout_for(self, tool_name: str) -> Optional[float]:
+        """获取工具超时（秒）；0 或 None 表示不限制。"""
+        try:
+            from app.config import settings
+
+            cfg = settings.resilience.tools
+            override = (cfg.timeout_overrides or {}).get(tool_name)
+            if override is not None:
+                return float(override) if float(override) > 0 else None
+            default = cfg.default_timeout_seconds
+            return float(default) if default and default > 0 else None
+        except Exception:
+            return None
+
     async def execute(
         self,
         tool_name: str,
@@ -189,14 +272,14 @@ class ToolExecutor:
         event_handler: Optional[Callable[[Any], Awaitable[None]]] = None,
     ) -> ToolResult:
         """
-        执行指定的 Tool。
+        执行指定的 Tool（带独立超时与结构化错误）。
 
         Args:
             tool_name: Tool 名称
             arguments: Tool 参数
 
         Returns:
-            ToolResult: 执行结果
+            ToolResult: 执行结果（失败时携带 error_code/retryable/suggestion）
         """
         tool = self.tools.get(tool_name)
         if not tool:
@@ -204,6 +287,9 @@ class ToolExecutor:
                 success=False,
                 data=None,
                 error=f"Tool '{tool_name}' not found",
+                error_code="NOT_FOUND",
+                retryable=False,
+                suggestion="请检查工具名称是否正确，或改用其他可用工具",
             )
 
         parsed_args = tool.parse_arguments(arguments) or {}
@@ -212,7 +298,31 @@ class ToolExecutor:
             parsed_args["user_id"] = self.user_id
         if event_handler and tool_name.startswith("subagent_"):
             parsed_args["event_handler"] = event_handler
-        return await tool.safe_execute(**parsed_args)
+
+        timeout = self._timeout_for(tool_name)
+        if timeout is None:
+            return await tool.safe_execute(**parsed_args)
+
+        try:
+            return await asyncio.wait_for(
+                tool.safe_execute(**parsed_args),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Tool %s timed out after %.1fs (user_id=%s)",
+                tool_name,
+                timeout,
+                self.user_id,
+            )
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Tool '{tool_name}' timed out after {timeout:.1f}s",
+                error_code="TIMEOUT",
+                retryable=True,
+                suggestion="工具执行超时，可稍后重试、简化参数或改用其他工具",
+            )
 
     def get_schemas(self, tool_names: Optional[list[str]] = None) -> list[dict]:
         """

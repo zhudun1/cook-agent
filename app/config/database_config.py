@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 # app/config/database_config.py
 """
 Database configuration for CookHero.

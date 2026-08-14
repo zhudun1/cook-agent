@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 # app/config/config.py
 """
 Unified configuration module for CookHero.
@@ -20,6 +23,9 @@ from app.config.web_search_config import WebSearchConfig
 from app.config.vision_config import VisionConfig, ImageGenerationConfig, ImageStorageConfig
 from app.config.evaluation_config import EvaluationConfig
 from app.config.mcp_config import MCPConfig
+from app.config.tokenizer_config import TokenizerConfig
+from app.config.resilience_config import ResilienceConfig
+from app.config.telemetry_config import TelemetryConfig
 from app.config.config_loader import (
     load_database_config,
     load_llm_config,
@@ -30,6 +36,9 @@ from app.config.config_loader import (
     load_mcp_config,
     load_image_generation_config,
     load_image_storage_config,
+    load_tokenizer_config,
+    load_resilience_config,
+    load_telemetry_config,
 )
 
 
@@ -112,6 +121,15 @@ class Settings(BaseModel):
 
     # Image Storage configuration loaded from config.yml (imgbb)
     image_storage: ImageStorageConfig = load_image_storage_config()
+
+    # Tokenizer & sliding window configuration loaded from config.yml
+    tokenizer: TokenizerConfig = load_tokenizer_config()
+
+    # LLM resilience configuration (retry / fallback / tool timeout) loaded from config.yml
+    resilience: ResilienceConfig = load_resilience_config()
+
+    # Telemetry configuration (trace / structured log / trajectory) loaded from config.yml
+    telemetry: TelemetryConfig = load_telemetry_config()
 
     class Config:
         arbitrary_types_allowed = True

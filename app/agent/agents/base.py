@@ -145,6 +145,9 @@ class BaseAgent(ABC):
                             success=result.success,
                             result=result.data,
                             error=result.error,
+                            error_code=getattr(result, "error_code", None),
+                            retryable=getattr(result, "retryable", False),
+                            suggestion=getattr(result, "suggestion", None),
                         )
                         tool_results.append(result_info)
 
@@ -330,6 +333,9 @@ class BaseAgent(ABC):
                                     success=result.success,
                                     result=result.data,
                                     error=result.error,
+                                    error_code=getattr(result, "error_code", None),
+                                    retryable=getattr(result, "retryable", False),
+                                    suggestion=getattr(result, "suggestion", None),
                                 )
                                 tool_results.append(result_info)
 
@@ -526,6 +532,28 @@ class BaseAgent(ABC):
             return response.content
         return str(response)
 
+    def _format_tool_result_content(self, result: ToolResultInfo) -> str:
+        """
+        格式化工具结果内容（失败时携带结构化错误，供 Agent 自主决策恢复路径）。
+
+        失败消息示例:
+            {"error": "...", "error_code": "TIMEOUT", "retryable": true, "suggestion": "..."}
+        """
+        if result.success:
+            return json.dumps(result.result, ensure_ascii=False, default=str)
+        # 结构化错误：error_code / retryable / suggestion 引导 Agent 恢复
+        return json.dumps(
+            {
+                "error": result.error or "Unknown tool error",
+                "error_code": getattr(result, "error_code", None) or "TOOL_ERROR",
+                "retryable": bool(getattr(result, "retryable", False)),
+                "suggestion": getattr(result, "suggestion", None)
+                or "请修正参数后重试，或改用其他工具",
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+
     def _append_tool_messages(
         self,
         messages: list[dict],
@@ -548,17 +576,12 @@ class BaseAgent(ABC):
 
         # 添加 tool 结果消息
         for result in tool_results:
-            result_content = (
-                json.dumps(result.result, ensure_ascii=False)
-                if result.success
-                else f"Error: {result.error}"
-            )
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": result.tool_call_id,
                     "name": result.name,
-                    "content": result_content,
+                    "content": self._format_tool_result_content(result),
                 }
             )
 
@@ -592,17 +615,12 @@ class BaseAgent(ABC):
 
         # 添加 tool 结果消息
         for result in tool_results:
-            result_content = (
-                json.dumps(result.result, ensure_ascii=False)
-                if result.success
-                else f"Error: {result.error}"
-            )
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": result.tool_call_id,
                     "name": result.name,
-                    "content": result_content,
+                    "content": self._format_tool_result_content(result),
                 }
             )
 

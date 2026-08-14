@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 # app/config/web_search_config.py
 """
 Web Search configuration for CookHero.

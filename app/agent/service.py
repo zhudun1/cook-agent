@@ -155,18 +155,44 @@ class AgentService:
         """
         from app.llm.provider import LLMProvider
         from app.config import settings
+        from app.telemetry.trace import (
+            set_trace_id,
+            get_trace_id,
+            set_attribute,
+            clear_trace_id,
+        )
+        from app.telemetry.trajectory import TrajectoryRecorder
+        from app.telemetry.logger import log_structured_event
 
         provider = LLMProvider(settings.llm)
+
+        # traceId 全链路追踪：优先复用 HTTP 中间件注入的 traceId
+        trace_id = get_trace_id()
+        if not trace_id:
+            trace_id = uuid.uuid4().hex
+        set_trace_id(trace_id)
+        set_attribute("user_id", user_id)
+        set_attribute("module", "agent")
 
         # Start timing
         thinking_start_time = time.time()
         thinking_end_time: Optional[float] = None
         answer_end_time: Optional[float] = None
+        recorder = None  # 在 try 内创建；except 分支需防御 None
 
         try:
             # 1. 获取或创建 Session（不再传入 agent_name）
             session = await self.repository.get_or_create_session(session_id, user_id)
             actual_session_id = str(session.id)
+            set_attribute("session_id", actual_session_id)
+
+            # 轨迹记录器（Agent turn 轨迹 JSON 持久化，支持回放调试）
+            recorder = TrajectoryRecorder(
+                trace_id=trace_id,
+                session_id=actual_session_id,
+                user_id=user_id,
+                agent=agent_name,
+            )
 
             # 2. 发送 session 信息
             yield self._format_event(
@@ -264,6 +290,24 @@ class AgentService:
                             "arguments": tool_call.arguments,
                         }
                     )
+                    # 轨迹录制：工具调用
+                    recorder.record(
+                        "tool_call",
+                        {
+                            "name": tool_call.name,
+                            "arguments": tool_call.arguments,
+                            "id": tool_call.id,
+                        },
+                        turn=iteration,
+                    )
+                    log_structured_event(
+                        "agent_tool_call",
+                        {
+                            "name": tool_call.name,
+                            "arguments": tool_call.arguments,
+                            "iteration": iteration,
+                        },
+                    )
                     # Store tool call in trace
                     trace_steps.append(
                         {
@@ -307,6 +351,30 @@ class AgentService:
                             "result": result.result,
                             "error": result.error,
                         }
+                    )
+                    # 轨迹录制：工具结果（含结构化错误，供 Agent 决策恢复路径）
+                    recorder.record(
+                        "tool_result",
+                        {
+                            "name": result.name,
+                            "success": result.success,
+                            "result": result.result,
+                            "error": result.error,
+                            "error_code": getattr(result, "error_code", None),
+                            "retryable": getattr(result, "retryable", False),
+                            "suggestion": getattr(result, "suggestion", None),
+                        },
+                        turn=iteration,
+                    )
+                    log_structured_event(
+                        "agent_tool_result",
+                        {
+                            "name": result.name,
+                            "success": result.success,
+                            "error": result.error,
+                            "error_code": getattr(result, "error_code", None),
+                            "retryable": getattr(result, "retryable", False),
+                        },
                     )
                     # Store tool result in trace
                     trace_steps.append(
@@ -471,7 +539,29 @@ class AgentService:
                 answer_duration_ms=final_answer_ms,
             )
 
-            # 8. 后台压缩上下文
+            # 8. 轨迹落盘 + 结构化日志（串联推理 -> 工具 -> 最终回答的完整调用链）
+            recorder.set_final_answer(response_content)
+            recorder.set_window_stats(context.window_stats)
+            recorder.set_metadata("thinking_duration_ms", final_thinking_ms)
+            recorder.set_metadata("answer_duration_ms", final_answer_ms)
+            recorder.set_metadata(
+                "total_duration_ms",
+                int((answer_end_time - thinking_start_time) * 1000),
+            )
+            recorder.save()
+            log_structured_event(
+                "agent_answer",
+                {
+                    "session_id": actual_session_id,
+                    "thinking_duration_ms": final_thinking_ms,
+                    "answer_duration_ms": final_answer_ms,
+                    "trace_steps": len(trace_steps),
+                    "window_stats": context.window_stats,
+                    "answer_preview": response_content[:200],
+                },
+            )
+
+            # 9. 后台压缩上下文
             asyncio.create_task(
                 self.context_compressor.maybe_compress(
                     actual_session_id,
@@ -482,7 +572,12 @@ class AgentService:
 
         except Exception as e:
             logger.exception(f"AgentService.chat failed: {e}")
+            if recorder is not None:
+                recorder.record("error", {"error": str(e)})
+                recorder.save()
             yield self._format_event("error", {"error": str(e)})
+        finally:
+            clear_trace_id()
 
     def _get_agent_or_fallback(self, agent_name: str) -> BaseAgent:
         try:

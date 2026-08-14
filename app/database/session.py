@@ -107,6 +107,20 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables initialized.")
 
+    # 轻量迁移：为已有库补充新增的评测字段（幂等）
+    try:
+        from sqlalchemy import text
+
+        async with _engine.begin() as conn:
+            for ddl in (
+                "ALTER TABLE rag_evaluations ADD COLUMN IF NOT EXISTS answer_correctness FLOAT",
+                "ALTER TABLE rag_evaluations ADD COLUMN IF NOT EXISTS reference_answer TEXT",
+                "ALTER TABLE rag_evaluations ADD COLUMN IF NOT EXISTS reference_contexts JSON",
+            ):
+                await conn.execute(text(ddl))
+    except Exception as e:
+        logger.warning("Evaluation column migration skipped: %s", e)
+
 
 async def close_db() -> None:
     """Close database connections."""

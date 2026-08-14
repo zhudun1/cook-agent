@@ -50,6 +50,9 @@ class ToolResultInfo:
     success: bool
     result: Any
     error: str | None = None
+    error_code: str | None = None
+    retryable: bool = False
+    suggestion: str | None = None
 
 
 @dataclass
@@ -67,11 +70,35 @@ class TraceStep:
 
 
 class ToolResult(BaseModel):
-    """Tool 执行结果"""
+    """
+    Tool 执行结果（结构化错误支持）。
+
+    Attributes:
+        success: 是否成功
+        data: 成功时的数据
+        error: 错误信息
+        error_code: 结构化错误码（TIMEOUT / TOOL_ERROR / VALIDATION_ERROR /
+            AUTH_ERROR / NOT_FOUND / RATE_LIMITED / UNKNOWN）
+        retryable: 该错误是否可通过重试恢复（Agent 自主决策恢复路径的依据）
+        suggestion: 给 Agent 的恢复建议（如 "稍后重试" / "改用其他工具"）
+    """
 
     success: bool
     data: Any = None
     error: str | None = None
+    error_code: str | None = None
+    retryable: bool = False
+    suggestion: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "success": self.success,
+            "data": self.data,
+            "error": self.error,
+            "error_code": self.error_code,
+            "retryable": self.retryable,
+            "suggestion": self.suggestion,
+        }
 
 @dataclass
 class AgentContext:
@@ -89,6 +116,7 @@ class AgentContext:
     images: list[dict] | None = None  # [{data, mime_type, url}]
     vision_analysis: dict | None = None  # Vision analysis result
     vision_tool_call_id: str | None = None  # Vision tool call id
+    window_stats: dict | None = None  # 滑动窗口截断统计（token 预算/丢弃消息数）
 
 
 @dataclass
