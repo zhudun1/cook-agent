@@ -33,6 +33,7 @@ import {
   RadialBar,
 } from 'recharts';
 import { useAuth } from '../contexts';
+import { TaskEvaluationPanel } from '../components/evaluation/TaskEvaluationPanel';
 import {
   getEvaluationStatistics,
   getEvaluationTrends,
@@ -529,6 +530,7 @@ export default function EvaluationPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Trend filters
+  const [view, setView] = useState<'rag' | 'tasks'>('rag');
   const [days, setDays] = useState(7);
   const [granularity, setGranularity] = useState<'day' | 'hour'>('day');
 
@@ -637,6 +639,33 @@ export default function EvaluationPage() {
         </div>
 
 
+        {/* 视图切换 */}
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setView('rag')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              view === 'rag'
+                ? 'bg-orange-500 text-white'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            RAG 评测
+          </button>
+          <button
+            onClick={() => setView('tasks')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              view === 'tasks'
+                ? 'bg-orange-500 text-white'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            任务评测
+          </button>
+        </div>
+
+        {view === 'tasks' && <TaskEvaluationPanel token={token || undefined} />}
+
+        {view === 'rag' && (
         {/* Top Stats Row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
           <StatCard
@@ -737,6 +766,7 @@ export default function EvaluationPage() {
           </section>
         </div>
       </div>
+        )}
     </div>
   );
 }

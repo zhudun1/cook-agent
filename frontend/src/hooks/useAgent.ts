@@ -41,6 +41,7 @@ interface StreamingState {
   isStreaming: boolean;
   tempId?: string; // present when a new conversation hasn't received a server id yet
   abortController?: AbortController; // controller for this conversation's stream
+  lastSeq?: number; // P3: 已应用的最大事件序号（断点恢复用）
 }
 
 // Helper functions for localStorage streaming cache
@@ -423,6 +424,16 @@ export function useAgent(token?: string) {
 
         if (abortController.signal.aborted) break;
 
+        // P3 断点恢复：记录已应用的事件序号
+        if (typeof (event as { _seq?: number })._seq === 'number') {
+          const seq = (event as { _seq: number })._seq;
+          const cached = streamingCacheRef.current.get(streamingSessionId);
+          if (cached) {
+            cached.lastSeq = seq;
+            saveStreamingCache(streamingCacheRef.current);
+          }
+        }
+
         switch (event.type) {
           case 'tool_call':
           case 'tool_result':
@@ -607,6 +618,89 @@ export function useAgent(token?: string) {
     }
   }, [sessionId, isLoading, token, messages]);
 
+  // P3 断点恢复：拉取断线期间缺失的 SSE 事件并回放
+  const resumeStreamEvents = async (sessionId: string, lastSeq?: number) => {
+    if (!sessionId || !token) return;
+    try {
+      const params = new URLSearchParams();
+      if (typeof lastSeq === 'number' && lastSeq >= 0) {
+        params.set('after', String(lastSeq));
+      }
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE || '/api/v1'}/agent/session/${sessionId}/stream/events?${params}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok) return;
+      const data = await response.json();
+      const events = (data.events || []) as Array<{ seq: number; event: string }>;
+      if (events.length === 0) return;
+
+      const assistantId = `resume-${sessionId}`;
+      let hasAssistant = false;
+      setMessages(prev => {
+        let next = [...prev];
+        for (const ev of events) {
+          const line = ev.event;
+          if (!line.startsWith('data: ')) continue;
+          let payload: { type?: string; content?: string; [k: string]: unknown };
+          try {
+            payload = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+          if (payload.type === 'text' && payload.content) {
+            if (!hasAssistant) {
+              hasAssistant = true;
+              next = [...next, {
+                id: assistantId,
+                role: 'assistant' as const,
+                content: payload.content,
+                isStreaming: true,
+                timestamp: new Date(),
+              }];
+            } else {
+              next = next.map(m =>
+                m.id === assistantId
+                  ? { ...m, content: m.content + payload.content }
+                  : m
+              );
+            }
+          } else if (payload.type === 'tool_call' || payload.type === 'tool_result' || payload.type === 'trace') {
+            if (hasAssistant) {
+              const step = {
+                action: payload.type === 'tool_call' ? 'tool_call' : payload.type === 'tool_result' ? 'tool_result' : 'trace',
+                name: (payload.name as string) || undefined,
+                content: payload.type === 'tool_result' ? payload.result as string : undefined,
+                error: payload.type === 'tool_result' ? (payload.error as string) || null : null,
+                iteration: payload.iteration as number | undefined,
+                timestamp: new Date().toISOString(),
+                tool_calls: payload.type === 'tool_call' ? [{ name: payload.name, arguments: payload.arguments }] : undefined,
+              };
+              next = next.map(m =>
+                m.id === assistantId
+                  ? { ...m, trace: [...(m.trace || []), step] }
+                  : m
+              );
+            }
+          }
+        }
+        return next;
+      });
+
+      // 更新断点
+      if (events.length > 0) {
+        const cached = streamingCacheRef.current.get(sessionId);
+        if (cached) {
+          cached.lastSeq = events[events.length - 1].seq;
+          cached.messages = [...(cached.messages || []), ...(hasAssistant ? [{ id: assistantId, role: 'assistant' as const, content: '', timestamp: new Date(), trace: [], isStreaming: true } as Message] : [])];
+          saveStreamingCache(streamingCacheRef.current);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to resume stream events:', e);
+    }
+  };
+
   const selectSession = useCallback(async (id: string) => {
     if (!id) return;
 
@@ -621,6 +715,8 @@ export function useAgent(token?: string) {
       setIsStreaming(cachedState.isStreaming);
       setIsLoading(cachedState.isStreaming);
       setError(null);
+      // P3 断点恢复：拉取断线期间缺失的事件并回放
+      void resumeStreamEvents(cachedState.sessionId, cachedState.lastSeq);
       return;
     }
 

@@ -10,6 +10,7 @@ export * from './conversation';
 export * from './knowledge';
 export * from './evaluation';
 export * from './agent';
+export * from './memory';
 
 
 // Named exports for backward compatibility

@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Settings, Palette, Plug, Bot, Trash2, Pencil } from 'lucide-react';
+import { X, Settings, Palette, Plug, Bot, Trash2, Pencil, Brain } from 'lucide-react';
 import {
   createMcpServer,
   deleteMcpServer,
@@ -20,6 +20,7 @@ import {
   getAvailableTools,
 } from '../../services/api';
 import { useAuth, useTheme } from '../../contexts';
+import { MemoryTab } from './MemoryTab';
 import type { SubagentSchema, ToolSchema } from '../../types';
 
 export interface UserProfileModalProps {
@@ -37,7 +38,7 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
   const [userInstruction, setUserInstruction] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | string[] | null>(null);
-  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'mcp' | 'agents'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'mcp' | 'agents' | 'memory'>('general');
   const [mcpServers, setMcpServers] = useState<{
     name: string;
     endpoint: string;
@@ -489,6 +490,12 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
               icon={<Bot size={18} />}
               label="Agent 配置"
             />
+            <TabButton
+              active={activeTab === 'memory'}
+              onClick={() => setActiveTab('memory')}
+              icon={<Brain size={18} />}
+              label="长期记忆"
+            />
           </div>
 
           {/* Right Content */}
@@ -555,6 +562,10 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
                 onEdit={handleEditMcpServer}
                 onDelete={handleDeleteMcpServer}
               />
+            )}
+
+            {activeTab === 'memory' && (
+              <MemoryTab token={token || undefined} />
             )}
 
             {activeTab === 'agents' && (

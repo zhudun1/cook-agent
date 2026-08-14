@@ -175,6 +175,86 @@ async def evaluation_health():
 
 
 # =============================================================================
+# P1 任务级评测 API（端到端任务完成率）
+# =============================================================================
+
+@router.post("/tasks/run")
+async def run_task_evaluation(
+    request: Request,
+    taskset: Optional[str] = Query(None, description="任务集文件路径（默认全部）"),
+    background: bool = Query(True, description="后台运行（推荐）"),
+):
+    """
+    触发任务级端到端评测（黄金任务集 -> Agent 完整执行 -> 判定完成率）。
+
+    **Parameters:**
+    - `taskset`: 可选，指定单个任务集文件；默认评测 testsets 下全部
+    - `background`: 后台运行（默认 true，立即返回 job_id）；false 同步等待
+
+    Returns:
+        background=true: {"job_id": ...}（轮询 GET /evaluation/tasks/latest）
+        background=false: 完整评测结果
+    """
+    from app.evaluation.task_runner import (
+        AgentTaskDataset,
+        TaskEvaluationRunner,
+        get_task_evaluation_runner,
+    )
+    from app.harness.jobs import job_manager
+
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="需要登录")
+
+    runner = get_task_evaluation_runner()
+
+    async def _run():
+        if taskset:
+            dataset = AgentTaskDataset.load(taskset)
+            result = await runner.run_dataset(dataset, user_id=user_id)
+            return {"datasets": {dataset.name: result}, "regression": None}
+        return await runner.run_all(user_id=user_id)
+
+    if background:
+        job_id = job_manager.start("task-evaluation", _run)
+        return {"job_id": job_id, "status": "running", "message": "任务评测已提交后台运行"}
+    result = await _run()
+    return result
+
+
+@router.get("/tasks/latest")
+async def get_latest_task_evaluation(
+    request: Request,
+    job_id: Optional[str] = Query(None, description="后台运行返回的 job_id"),
+):
+    """
+    查询最近一次任务评测结果（或指定后台任务）。
+
+    **Parameters:**
+    - `job_id`: 可选，指定后台任务 ID
+    """
+    from app.harness.jobs import job_manager
+
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="需要登录")
+
+    if job_id:
+        job = await job_manager.output(job_id)
+        if not job or job.get("status") == "unknown":
+            raise HTTPException(status_code=404, detail="任务不存在")
+        return job
+    # 最近一次（取最后一个 task-evaluation 任务，含 output）
+    jobs = [
+        j for j in job_manager.list() if j["name"] == "task-evaluation"
+    ]
+    if not jobs:
+        return {"status": "no_task_run", "message": "尚未运行过任务评测"}
+    last = await job_manager.output(jobs[-1]["job_id"])
+    return last
+
+
+# =============================================================================
 # P1 可观测性: 工具级 SLO（成功率 / 延迟 / P95）
 # =============================================================================
 

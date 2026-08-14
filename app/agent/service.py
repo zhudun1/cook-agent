@@ -190,9 +190,11 @@ class AgentService:
             from app.agent.event_stream import event_stream_store
 
             def emit(event_type: str, data: dict) -> str:
-                event_str = self._format_event(event_type, data)
-                event_stream_store.append(actual_session_id, event_str)
-                return event_str
+                # P3 断点恢复：事件附带递增序号（前端断点标记）
+                event_copy = dict(data)
+                seq = event_stream_store.append(actual_session_id, self._format_event(event_type, data))
+                event_copy["_seq"] = seq
+                return self._format_event(event_type, event_copy)
 
             # 轨迹记录器（Agent turn 轨迹 JSON 持久化，支持回放调试）
             recorder = TrajectoryRecorder(
