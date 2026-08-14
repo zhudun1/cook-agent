@@ -666,6 +666,7 @@ export default function EvaluationPage() {
         {view === 'tasks' && <TaskEvaluationPanel token={token || undefined} />}
 
         {view === 'rag' && (
+        <>
         {/* Top Stats Row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
           <StatCard
@@ -764,9 +765,10 @@ export default function EvaluationPage() {
                <AlertList data={alerts} loading={loading} />
             </div>
           </section>
+        </>
+        )}
         </div>
       </div>
-        )}
     </div>
   );
 }
