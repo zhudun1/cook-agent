@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Optional
 
 if TYPE_CHECKING:
     from app.config.resilience_config import (
-        FallbackConfig,
         ResilienceConfig,
         RetryConfig,
     )

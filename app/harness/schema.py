@@ -19,7 +19,7 @@ errors 为人类可读的错误路径列表（如 "properties.name: 期望 strin
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # Schema 关键字白名单（防止 schema 本身被滥用为代码执行载体）
 ALLOWED_KEYWORDS = {

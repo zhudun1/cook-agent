@@ -4,7 +4,6 @@ Includes security features: account lockout, audit logging.
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field

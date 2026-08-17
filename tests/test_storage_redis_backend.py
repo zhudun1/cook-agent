@@ -22,7 +22,6 @@ _sec_pkg = types.ModuleType("app.security")
 _sec_pkg.__path__ = [os.path.join(os.path.dirname(__file__), "..", "app", "security")]
 sys.modules["app.security"] = _sec_pkg
 
-import pytest
 
 from app.storage.backend import RedisBackend
 

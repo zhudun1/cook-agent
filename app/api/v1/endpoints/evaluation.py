@@ -4,7 +4,7 @@ API endpoints for RAG evaluation metrics.
 Provides access to evaluation statistics, trends, and quality alerts.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -197,7 +197,6 @@ async def run_task_evaluation(
     """
     from app.evaluation.task_runner import (
         AgentTaskDataset,
-        TaskEvaluationRunner,
         get_task_evaluation_runner,
     )
     from app.harness.jobs import job_manager

@@ -9,7 +9,6 @@ Uses Tavily official Python client for reliable web search.
 Uses LLM tool calling for structured output.
 """
 
-import json
 import logging
 import os
 from dataclasses import dataclass, field

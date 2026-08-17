@@ -425,8 +425,8 @@ export function useAgent(token?: string) {
         if (abortController.signal.aborted) break;
 
         // P3 断点恢复：记录已应用的事件序号
-        if (typeof (event as { _seq?: number })._seq === 'number') {
-          const seq = (event as { _seq: number })._seq;
+        if (typeof (event as unknown as { _seq?: number })._seq === 'number') {
+          const seq = (event as unknown as { _seq: number })._seq;
           const cached = streamingCacheRef.current.get(streamingSessionId);
           if (cached) {
             cached.lastSeq = seq;

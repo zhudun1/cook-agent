@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Any, List, Optional
 
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.agent.database.models import AgentSessionModel, AgentMessageModel

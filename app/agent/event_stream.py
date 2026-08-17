@@ -13,7 +13,7 @@ P3 断点恢复：把 Agent 执行的 SSE 事件按会话顺序缓存，
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 

@@ -298,7 +298,6 @@ class AgentHub:
 
 
 # Imported only for type checking; avoid runtime circular import
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.agent.agents import BaseAgent  # pragma: no cover

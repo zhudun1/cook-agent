@@ -3,7 +3,7 @@
  * 触发黄金任务集端到端评测，展示完成率与失败列表。
  */
 import { useState } from 'react';
-import { CheckCircle2, Loader2, Play, RefreshCcw, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, Play, XCircle } from 'lucide-react';
 import { createJsonHeaders, createAuthHeaders } from '../../services/api/client';
 import { API_BASE } from '../../constants';
 

@@ -20,7 +20,6 @@ tiktoken 实时 Token 计数
 import logging
 import re
 import threading
-from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)

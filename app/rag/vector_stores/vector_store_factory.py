@@ -6,7 +6,6 @@ from langchain_milvus import Milvus, BM25BuiltInFunction
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-from app.config.rag_config import VectorStoreConfig
 from app.config.database_config import MilvusConfig
 
 logger = logging.getLogger(__name__)

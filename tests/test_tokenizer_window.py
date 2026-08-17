@@ -19,7 +19,7 @@ sys.modules["app.llm"] = _llm_pkg
 
 import pytest
 
-from app.llm.tokenizer import TokenCounter, count_tokens, count_messages, fit_in_budget
+from app.llm.tokenizer import TokenCounter, count_messages, fit_in_budget
 
 
 @pytest.fixture

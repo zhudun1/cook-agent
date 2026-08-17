@@ -17,7 +17,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable, Optional
 
-from pydantic import BaseModel
 
 from app.agent.types import ToolResult
 

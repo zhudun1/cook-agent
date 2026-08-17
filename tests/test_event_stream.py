@@ -17,7 +17,6 @@ sys.modules["app.agent"] = _agent_pkg
 
 import asyncio
 
-import pytest
 
 from app.agent.event_stream import EventStreamStore
 

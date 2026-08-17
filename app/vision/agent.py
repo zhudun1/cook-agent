@@ -8,7 +8,6 @@ This agent:
 3. Generates appropriate responses or hands off to the main conversation flow
 """
 
-import json
 import logging
 from dataclasses import dataclass
 from enum import Enum

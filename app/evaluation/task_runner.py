@@ -24,7 +24,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -400,7 +399,7 @@ class TaskEvaluationRunner:
         Returns:
             {datasets: {...}, regression: {...}}
         """
-        dir_path = tasksets_dir or self.config.testsets_dir
+        dir_path = tasksets_dir or getattr(self.config, "task_testsets_dir", "testsets/tasks")
         datasets = AgentTaskDataset.load_dir(dir_path)
         if not datasets:
             logger.warning("No task datasets found in %s", dir_path)

@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from app.config.memory_config import MemoryConfig
 from app.memory.extractor import memory_extractor

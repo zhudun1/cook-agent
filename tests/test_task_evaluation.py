@@ -95,7 +95,7 @@ class TestAgentTaskDataset:
             AgentTaskDataset.load("no_such_tasks.jsonl")
 
     def test_real_sample(self):
-        ds = AgentTaskDataset.load("testsets/agent_tasks.jsonl")
+        ds = AgentTaskDataset.load("testsets/tasks/agent_tasks.jsonl")
         assert len(ds) == 4
         assert all(t.tools_required for t in ds.tasks)
 

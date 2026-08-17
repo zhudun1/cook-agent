@@ -4,7 +4,7 @@ API endpoints for LLM usage statistics.
 Provides access to token usage, model distribution, and module-level metrics.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request

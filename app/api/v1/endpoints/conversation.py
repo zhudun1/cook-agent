@@ -5,7 +5,6 @@ Includes security features: input validation, prompt injection protection.
 """
 
 import asyncio
-import base64
 import logging
 from typing import Any, AsyncGenerator, Dict, List, Optional
 

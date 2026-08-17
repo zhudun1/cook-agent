@@ -1,0 +1,19 @@
+# Ruff 配置（CI lint 门禁）
+#
+# 策略：只启用 **bug 级 / 正确性** 规则（F + E9），
+# 风格类规则（E501 行长度等）不在此门禁内——上游代码量大，
+# 全量风格改造留作独立任务，避免破坏性改动。
+#
+# 本地快速检查:  ruff check .
+# CI 步骤:       ruff check app/ tests/ scripts/
+
+line-length = 120
+target-version = "py312"
+
+[lint]
+# F: pyflakes（未定义/未使用/重定义——真实 bug 级）
+# E9: 语法错误相关
+select = ["F", "E9"]
+
+# 允许脚本目录的 shebang 可执行性问题（EXE 规则不在 F/E9 内，无需 ignore）
+# 说明: 如需扩展规则集，先在本地 `ruff check --statistics` 评估修复成本

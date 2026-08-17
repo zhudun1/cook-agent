@@ -180,6 +180,18 @@ cd frontend && npm install && npm run dev
 - 前端：http://localhost:5173
 - API 文档：http://localhost:8000/docs
 
+### CI 流水线（GitHub Actions）
+
+每次 push / PR 自动执行：
+
+```yaml
+backend job:   ruff lint（bug 级规则）→ pytest（135 测试）→ RAG/任务集校验
+               → 任务评测回归门禁（配置 LLM_API_KEY secret 后启用）
+frontend job:  npm ci → tsc 类型检查 → vite 生产构建
+```
+
+本地复现：`pip install -r requirements-dev.txt && ruff check app/ tests/ scripts/ && pytest tests/ -q --ignore=tests/test_mcp.py`
+
 ### 方式二：Docker 完整部署（PostgreSQL + Redis + Milvus）
 
 ```bash

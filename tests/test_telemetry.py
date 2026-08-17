@@ -8,9 +8,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import json
 
-import pytest
 
 from app.telemetry.trace import (
     clear_trace_id,

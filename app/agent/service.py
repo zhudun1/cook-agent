@@ -16,7 +16,7 @@ from typing import Any, AsyncGenerator, Optional
 DEFAULT_TRUNCATE_THRESHOLD = 500
 TRUNCATE_SUFFIX = "...[truncated]"
 
-from app.agent.types import AgentChunk, AgentChunkType, AgentContext
+from app.agent.types import AgentChunkType, AgentContext
 from app.agent.agents import BaseAgent
 from app.agent.context import AgentContextBuilder, AgentContextCompressor
 from app.agent.database.repository import AgentRepository, agent_repository

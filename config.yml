@@ -200,6 +200,8 @@ evaluation:
     - "answer_correctness"
   # 离线评测默认输出报告目录
   report_dir: "data/evaluation_reports"
+  # Agent 任务评测集目录（与 RAG 测试集分离）
+  task_testsets_dir: "testsets/tasks"
   # 单条 question 的最长字符数（防异常长输入）
   max_question_chars: 2000
 

@@ -475,7 +475,7 @@ class LLMInvoker:
                 except LLMResilienceError as e:
                     last_err = e
                     # 模型降级
-                except Exception as e:
+                except Exception:
                     # 流中途失败：不重试（已产生部分输出）
                     raise
 

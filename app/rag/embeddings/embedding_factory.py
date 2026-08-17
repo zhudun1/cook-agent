@@ -7,7 +7,7 @@ Embedding 模型工厂。
 保证服务仍可启动（RAG 检索降级，Agent/对话主链路不受影响）。
 """
 import logging
-from typing import List, Optional
+from typing import List
 
 from langchain_core.embeddings import Embeddings
 from app.config import RAGConfig

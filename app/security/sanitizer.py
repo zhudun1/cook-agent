@@ -7,7 +7,7 @@ sensitive information leakage in logs and responses.
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 
 class SensitiveDataFilter(logging.Filter):

@@ -17,7 +17,6 @@ sys.modules["app.security"] = _security_pkg
 
 import asyncio
 
-import pytest
 
 from app.config.security_config import (
     ApprovalConfig,

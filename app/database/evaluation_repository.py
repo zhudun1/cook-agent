@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import RAGEvaluationModel
 from app.database.session import get_session_context

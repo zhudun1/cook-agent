@@ -17,7 +17,7 @@ from __future__ import annotations
 
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from app.llm.tokenizer import get_token_counter, TokenCounter

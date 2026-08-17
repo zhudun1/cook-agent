@@ -250,6 +250,7 @@ def load_evaluation_config() -> EvaluationConfig:
         timeout_seconds=eval_data.get("timeout_seconds", 60),
         alert_thresholds=eval_data.get("alert_thresholds", AlertThresholds()),
         testsets_dir=eval_data.get("testsets_dir", "testsets"),
+        task_testsets_dir=eval_data.get("task_testsets_dir", "testsets/tasks"),
         ground_truth_metrics=eval_data.get("ground_truth_metrics", [
             "context_precision",
             "context_recall",

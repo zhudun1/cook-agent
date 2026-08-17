@@ -84,7 +84,6 @@ class TestRedisBackendInterface:
 
     def test_importable(self):
         # RedisBackend 类应可导入（连接惰性）
-        from app.storage.backend import RedisBackend
 
         assert RedisBackend.name == "redis"
 

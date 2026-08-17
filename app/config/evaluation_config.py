@@ -12,7 +12,7 @@ Configuration for RAG evaluation using RAGAS framework.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List
 
 
 @dataclass
@@ -68,6 +68,8 @@ class EvaluationConfig:
     # Grounding truth (offline evaluation)
     # ------------------------------------------------------------------
     testsets_dir: str = "testsets"
+    # Agent 任务评测集目录（与 RAG 测试集分离，避免 loader 互相误读）
+    task_testsets_dir: str = "testsets/tasks"
     ground_truth_metrics: List[str] = field(default_factory=lambda: [
         "context_precision",
         "context_recall",

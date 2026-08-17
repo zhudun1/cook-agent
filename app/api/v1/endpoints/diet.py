@@ -7,7 +7,7 @@ Provides RESTful API for diet plans, meals, logs, and analysis.
 
 import base64
 import logging
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query

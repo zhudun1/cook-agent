@@ -18,7 +18,6 @@ Key invariant:
 This module does NOT call LLM directly. Compression is handled by ContextCompressor.
 """
 
-from sys import path
 from typing import Dict, List, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage

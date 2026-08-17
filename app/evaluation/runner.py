@@ -17,12 +17,10 @@ Grounding truth 离线批量评测执行器。
 
 
 import asyncio
-import json
 import logging
 import math
 import time
 import uuid
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.config import settings

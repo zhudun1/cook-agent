@@ -16,7 +16,7 @@ Compression rule:
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 

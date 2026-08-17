@@ -14,7 +14,7 @@ from app.agent.tools.base import BaseTool
 from app.agent.types import ToolResult, TraceStep
 
 if TYPE_CHECKING:
-    from app.agent.subagents.base import BaseSubagent, SubagentConfig
+    from app.agent.subagents.base import BaseSubagent
 
 logger = logging.getLogger(__name__)
 

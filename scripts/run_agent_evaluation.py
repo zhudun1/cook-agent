@@ -43,7 +43,7 @@ async def main(args: argparse.Namespace) -> int:
         if args.taskset:
             datasets = [AgentTaskDataset.load(args.taskset)]
         else:
-            datasets = AgentTaskDataset.load_dir(config.testsets_dir)
+            datasets = AgentTaskDataset.load_dir(config.task_testsets_dir)
         for ds in datasets:
             print(f"[OK] {ds.name}: {len(ds)} tasks")
         return 0
@@ -63,7 +63,7 @@ async def main(args: argparse.Namespace) -> int:
         print(f"完成率: {result['completion_rate']:.1%} ({result['achieved']}/{result['total_tasks']})")
     else:
         all_results = await runner.run_all(
-            tasksets_dir=config.testsets_dir,
+            tasksets_dir=getattr(config, "task_testsets_dir", "testsets/tasks"),
             user_id=args.user_id,
             baseline_path=args.baseline,
             regression_threshold=args.threshold,

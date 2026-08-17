@@ -6,7 +6,6 @@ All documents are stored in PostgreSQL and Milvus, no in-memory document storage
 
 import asyncio
 import logging
-import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
