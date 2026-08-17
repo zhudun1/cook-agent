@@ -157,7 +157,14 @@ class ApprovalManager:
         return req
 
     async def decide(self, approval_id: str, approve: bool, by_user: Optional[str] = None) -> bool:
-        """用户决策：批准/拒绝（同步更新进程内 + 后端）。"""
+        """用户决策：批准/拒绝（进程内 + 后端；跨实例时从后端兜底恢复）。"""
+        with self._lock:
+            req = self._requests.get(approval_id)
+        if req is None:
+            # 跨实例：本实例无此请求，从后端恢复
+            req = await self.get_status(approval_id)
+            if req is None:
+                return False
         with self._lock:
             req = self._requests.get(approval_id)
             if req is None or req.status != ApprovalStatus.PENDING:
@@ -187,36 +194,38 @@ class ApprovalManager:
 
     async def get_status(self, approval_id: str) -> Optional[ApprovalRequest]:
         """
-        查询审批状态（进程内优先，后端兜底——支持多实例跨实例决策）。
+        查询审批状态（后端为权威数据，进程内仅镜像——保证跨实例一致）。
 
-        超时未决策的自动标记 TIMEOUT（懒判定）。
+        超时未决策的自动标记 TIMEOUT（懒判定，仅影响镜像展示）。
         """
-        with self._lock:
-            req = self._requests.get(approval_id)
-        if req is None:
-            # 后端兜底：本实例无此请求（可能由其他实例创建/决策）
-            try:
-                raw = await self._b().get(self._req_key(approval_id))
-                if raw:
-                    import json as _json
+        req: Optional[ApprovalRequest] = None
+        try:
+            raw = await self._b().get(self._req_key(approval_id))
+            if raw:
+                import json as _json
 
-                    data = _json.loads(raw)
-                    req = ApprovalRequest(
-                        approval_id=data["approval_id"],
-                        tool_name=data["tool_name"],
-                        arguments=data.get("arguments") or {},
-                        user_id=data.get("user_id"),
-                        session_id=data.get("session_id"),
-                        status=ApprovalStatus(data.get("status", "pending")),
-                        created_at=data.get("created_at", ""),
-                        decided_at=data.get("decided_at"),
-                        decided_by=data.get("decided_by"),
-                        timeout_seconds=data.get("timeout_seconds", 120.0),
-                    )
-                    with self._lock:
-                        self._requests[approval_id] = req
-            except Exception as e:
-                logger.debug("Approval backend read failed: %s", e)
+                data = _json.loads(raw)
+                req = ApprovalRequest(
+                    approval_id=data["approval_id"],
+                    tool_name=data["tool_name"],
+                    arguments=data.get("arguments") or {},
+                    user_id=data.get("user_id"),
+                    session_id=data.get("session_id"),
+                    status=ApprovalStatus(data.get("status", "pending")),
+                    created_at=data.get("created_at", ""),
+                    decided_at=data.get("decided_at"),
+                    decided_by=data.get("decided_by"),
+                    timeout_seconds=data.get("timeout_seconds", 120.0),
+                )
+                with self._lock:
+                    self._requests[approval_id] = req
+            else:
+                with self._lock:
+                    req = self._requests.get(approval_id)
+        except Exception as e:
+            logger.debug("Approval backend read failed, using local: %s", e)
+            with self._lock:
+                req = self._requests.get(approval_id)
         if req is None:
             return None
         if req.status == ApprovalStatus.PENDING:
