@@ -143,6 +143,7 @@
 - **数据面可插拔**：成本熔断计数 / 审批请求 / 事件流 / 工具 SLO 统一走 `StorageBackend` 抽象
 - **MemoryBackend**（单机默认）+ **RedisBackend**（生产多实例共享状态），`storage:` 配置一键切换
 - 多实例部署时成本熔断、审批决策、断点恢复、SLO 聚合跨实例一致
+- 📖 详细说明：[docs/STORAGE_BACKEND.md](docs/STORAGE_BACKEND.md) · 本地 Redis 一键启动：`./scripts/start_redis.sh`
 
 ### 14. Harness 编排原语（`app/harness/`）
 - **持久化 Goal**：版本号乐观并发、暂停/恢复/完成/阻塞状态机
