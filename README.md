@@ -139,7 +139,12 @@
 - 同一 prompt 多版本注册，**按用户稳定分流**（md5 哈希 → 权重区间）
 - 内容哈希校验，支持 A/B 实验与逐步灰度
 
-### 13. Harness 编排原语（`app/harness/`）
+### 13. 统一存储后端（`app/storage/`）
+- **数据面可插拔**：成本熔断计数 / 审批请求 / 事件流 / 工具 SLO 统一走 `StorageBackend` 抽象
+- **MemoryBackend**（单机默认）+ **RedisBackend**（生产多实例共享状态），`storage:` 配置一键切换
+- 多实例部署时成本熔断、审批决策、断点恢复、SLO 聚合跨实例一致
+
+### 14. Harness 编排原语（`app/harness/`）
 - **持久化 Goal**：版本号乐观并发、暂停/恢复/完成/阻塞状态机
 - **Todo 清单**：整体替换语义 + 状态机
 - **Schema 校验**：结构化结果 fail-fast
@@ -213,6 +218,7 @@ security:         # P0: cost_guard / approval / permissions / injection_guard
 memory:           # P2: 长期记忆（提取 LLM 层级 / 召回条数 / 上限）
 evaluation:       # P1: testsets 目录 / grounding truth 指标 / 报告目录
 prompt_registry:  # P3: Prompt 多版本灰度（按用户稳定分流）
+storage:          # 统一存储后端：memory（单机）| redis（多实例）
 ```
 
 ---

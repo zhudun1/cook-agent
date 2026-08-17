@@ -33,50 +33,71 @@ from app.security.permissions import PermissionMatrix
 
 class TestCostGuard:
     def test_within_budget(self):
-        guard = CostGuard(CostGuardConfig(session_token_budget=1000))
-        check = guard.check("s1")
-        assert check.allowed
-        guard.record("s1", 300, 200)
-        check = guard.check("s1")
-        assert check.allowed
-        assert check.session_used == 500
+        async def main():
+            guard = CostGuard(CostGuardConfig(session_token_budget=1000))
+            check = await guard.check("cost-t1")
+            assert check.allowed
+            await guard.record("cost-t1", 300, 200)
+            check = await guard.check("cost-t1")
+            assert check.allowed
+            assert check.session_used == 500
+            await guard.reset("cost-t1")
+
+        asyncio.run(main())
 
     def test_budget_exceeded_refuse(self):
-        guard = CostGuard(
-            CostGuardConfig(session_token_budget=100, action="refuse")
-        )
-        guard.record("s1", 60, 60)
-        check = guard.check("s1")
-        assert not check.allowed
-        assert check.action == "refuse"
+        async def main():
+            guard = CostGuard(
+                CostGuardConfig(session_token_budget=100, action="refuse")
+            )
+            await guard.record("cost-t2", 60, 60)
+            check = await guard.check("cost-t2")
+            assert not check.allowed
+            assert check.action == "refuse"
+            await guard.reset("cost-t2")
+
+        asyncio.run(main())
 
     def test_budget_exceeded_degrades_allows(self):
-        guard = CostGuard(
-            CostGuardConfig(session_token_budget=100, action="degrade")
-        )
-        guard.record("s1", 60, 60)
-        check = guard.check("s1")
-        assert check.allowed  # degrade 动作仍允许（调用方自行降级）
-        assert check.action == "degrade"
+        async def main():
+            guard = CostGuard(
+                CostGuardConfig(session_token_budget=100, action="degrade")
+            )
+            await guard.record("cost-t3", 60, 60)
+            check = await guard.check("cost-t3")
+            assert check.allowed  # degrade 动作仍允许（调用方自行降级）
+            assert check.action == "degrade"
+            await guard.reset("cost-t3")
+
+        asyncio.run(main())
 
     def test_per_turn_budget(self):
-        guard = CostGuard(
-            CostGuardConfig(session_token_budget=10000, per_turn_token_budget=100)
-        )
-        check = guard.check("s1", estimated_turn_tokens=150)
-        assert not check.allowed
+        async def main():
+            guard = CostGuard(
+                CostGuardConfig(session_token_budget=10000, per_turn_token_budget=100)
+            )
+            check = await guard.check("cost-t4", estimated_turn_tokens=150)
+            assert not check.allowed
+
+        asyncio.run(main())
 
     def test_disabled(self):
-        guard = CostGuard(CostGuardConfig(enabled=False))
-        check = guard.check("s1")
-        assert check.allowed
+        async def main():
+            guard = CostGuard(CostGuardConfig(enabled=False))
+            check = await guard.check("cost-t5")
+            assert check.allowed
+
+        asyncio.run(main())
 
     def test_usage_query_and_reset(self):
-        guard = CostGuard(CostGuardConfig(session_token_budget=1000))
-        guard.record("s1", 10, 20)
-        assert guard.get_usage("s1")["total_tokens"] == 30
-        guard.reset("s1")
-        assert guard.get_usage("s1")["total_tokens"] == 0
+        async def main():
+            guard = CostGuard(CostGuardConfig(session_token_budget=1000))
+            await guard.record("cost-t6", 10, 20)
+            assert (await guard.get_usage("cost-t6"))["total_tokens"] == 30
+            await guard.reset("cost-t6")
+            assert (await guard.get_usage("cost-t6"))["total_tokens"] == 0
+
+        asyncio.run(main())
 
 
 class TestPermissionMatrix:
@@ -132,25 +153,31 @@ class TestPermissionMatrix:
 
 class TestApprovalManager:
     def test_request_and_approve(self):
-        mgr = ApprovalManager(ApprovalConfig())
-        req = mgr.request("image_generator", {"prompt": "x"}, user_id="u1")
-        assert req.status == ApprovalStatus.PENDING
-        assert mgr.requires_approval("image_generator")
-        assert not mgr.requires_approval("calculator")
+        async def main():
+            mgr = ApprovalManager(ApprovalConfig())
+            req = await mgr.request("image_generator", {"prompt": "x"}, user_id="u1")
+            assert req.status == ApprovalStatus.PENDING
+            assert mgr.requires_approval("image_generator")
+            assert not mgr.requires_approval("calculator")
 
-        assert mgr.decide(req.approval_id, approve=True, by_user="u1")
-        status = mgr.get_status(req.approval_id)
-        assert status.status == ApprovalStatus.APPROVED
-        assert status.decided_by == "u1"
+            assert await mgr.decide(req.approval_id, approve=True, by_user="u1")
+            status = await mgr.get_status(req.approval_id)
+            assert status.status == ApprovalStatus.APPROVED
+            assert status.decided_by == "u1"
 
-        # 重复决策失败
-        assert not mgr.decide(req.approval_id, approve=False, by_user="u1")
+            # 重复决策失败
+            assert not await mgr.decide(req.approval_id, approve=False, by_user="u1")
+
+        asyncio.run(main())
 
     def test_reject(self):
-        mgr = ApprovalManager(ApprovalConfig())
-        req = mgr.request("image_generator", {}, user_id="u1")
-        assert mgr.decide(req.approval_id, approve=False, by_user="u1")
-        assert mgr.get_status(req.approval_id).status == ApprovalStatus.REJECTED
+        async def main():
+            mgr = ApprovalManager(ApprovalConfig())
+            req = await mgr.request("image_generator", {}, user_id="u1")
+            assert await mgr.decide(req.approval_id, approve=False, by_user="u1")
+            assert (await mgr.get_status(req.approval_id)).status == ApprovalStatus.REJECTED
+
+        asyncio.run(main())
 
     def test_glob_patterns(self):
         mgr = ApprovalManager(
@@ -160,23 +187,19 @@ class TestApprovalManager:
         assert not mgr.requires_approval("web_search")
 
     def test_await_decision_timeout(self):
-        mgr = ApprovalManager(
-            ApprovalConfig(timeout_seconds=0.2)
-        )
-        req = mgr.request("image_generator", {}, user_id="u1", timeout_seconds=0.2)
-
         async def main():
+            mgr = ApprovalManager(ApprovalConfig(timeout_seconds=0.2))
+            req = await mgr.request("image_generator", {}, user_id="u1", timeout_seconds=0.2)
             return await mgr.await_decision(req.approval_id, timeout_seconds=0.5, poll_interval=0.05)
 
         result = asyncio.run(main())
         assert result.status == ApprovalStatus.TIMEOUT
 
     def test_await_decision_approved(self):
-        mgr = ApprovalManager(ApprovalConfig(timeout_seconds=10))
-        req = mgr.request("image_generator", {}, user_id="u1", timeout_seconds=10)
-
         async def main():
-            mgr.decide(req.approval_id, approve=True, by_user="u1")
+            mgr = ApprovalManager(ApprovalConfig(timeout_seconds=10))
+            req = await mgr.request("image_generator", {}, user_id="u1", timeout_seconds=10)
+            await mgr.decide(req.approval_id, approve=True, by_user="u1")
             return await mgr.await_decision(req.approval_id, timeout_seconds=1, poll_interval=0.05)
 
         result = asyncio.run(main())
@@ -190,13 +213,16 @@ class TestApprovalManager:
         assert not mgr.auto_approve("u1")
 
     def test_list_pending(self):
-        mgr = ApprovalManager(ApprovalConfig())
-        r1 = mgr.request("image_generator", {}, user_id="u1", session_id="s1")
-        r2 = mgr.request("image_generator", {}, user_id="u1", session_id="s2")
-        mgr.decide(r1.approval_id, approve=True, by_user="u1")
-        pending = mgr.list_pending(session_id="s2")
-        assert len(pending) == 1
-        assert pending[0]["approval_id"] == r2.approval_id
+        async def main():
+            mgr = ApprovalManager(ApprovalConfig())
+            r1 = await mgr.request("image_generator", {}, user_id="u1", session_id="s1")
+            r2 = await mgr.request("image_generator", {}, user_id="u1", session_id="s2")
+            await mgr.decide(r1.approval_id, approve=True, by_user="u1")
+            pending = mgr.list_pending(session_id="s2")
+            assert len(pending) == 1
+            assert pending[0]["approval_id"] == r2.approval_id
+
+        asyncio.run(main())
 
 
 class TestInjectionDetector:

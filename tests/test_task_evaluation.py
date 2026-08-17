@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import json
 
 import pytest
+import asyncio
 
 from app.evaluation.tool_metrics import ToolMetricsCollector
 from app.evaluation.task_runner import (
@@ -23,34 +24,46 @@ from app.evaluation.task_runner import (
 
 class TestToolMetrics:
     def test_record_and_aggregate(self):
-        c = ToolMetricsCollector(max_records=100)
-        c.record("calculator", success=True, duration_ms=50)
-        c.record("calculator", success=True, duration_ms=150)
-        c.record("calculator", success=False, duration_ms=30000, error_code="TIMEOUT")
+        async def main():
+            c = ToolMetricsCollector(max_records=100)
+            await c.record("calculator", success=True, duration_ms=50)
+            await c.record("calculator", success=True, duration_ms=150)
+            await c.record("calculator", success=False, duration_ms=30000, error_code="TIMEOUT")
 
-        stats = c.get_stats("calculator")
-        agg = stats["tools"]["calculator"]
-        assert agg["calls"] == 3
-        assert abs(agg["success_rate"] - 2 / 3) < 0.001  # round(..., 4) 后比较
-        assert agg["error_codes"] == {"TIMEOUT": 1}
-        assert agg["avg_duration_ms"] == pytest.approx((50 + 150 + 30000) / 3)
-        assert agg["p95_ms"] is not None
+            stats = await c.get_stats("calculator")
+            agg = stats["tools"]["calculator"]
+            assert agg["calls"] == 3
+            assert abs(agg["success_rate"] - 2 / 3) < 0.001  # round(..., 4) 后比较
+            assert agg["error_codes"] == {"TIMEOUT": 1}
+            assert agg["avg_duration_ms"] == pytest.approx((50 + 150 + 30000) / 3)
+            assert agg["p95_ms"] is not None
+            await c.reset()
+
+        asyncio.run(main())
 
     def test_per_tool_and_totals(self):
-        c = ToolMetricsCollector(max_records=100)
-        c.record("calculator", success=True, duration_ms=10)
-        c.record("datetime", success=True, duration_ms=20)
-        stats = c.get_stats()
-        assert set(stats["tools"].keys()) == {"calculator", "datetime"}
-        assert stats["totals"]["calls"] == 2
+        async def main():
+            c = ToolMetricsCollector(max_records=100)
+            await c.record("calculator", success=True, duration_ms=10)
+            await c.record("datetime", success=True, duration_ms=20)
+            stats = await c.get_stats()
+            assert set(stats["tools"].keys()) == {"calculator", "datetime"}
+            assert stats["totals"]["calls"] == 2
+            await c.reset()
+
+        asyncio.run(main())
 
     def test_window_since(self):
-        c = ToolMetricsCollector(max_records=100)
-        c.record("calculator", success=True, duration_ms=10)
-        stats = c.get_stats(since=0)  # 全部
-        assert stats["totals"]["calls"] == 1
-        stats_now = c.get_stats(since=2 ** 31)  # 未来时间戳 -> 无记录
-        assert stats_now["totals"]["calls"] == 0
+        async def main():
+            c = ToolMetricsCollector(max_records=100)
+            await c.record("calculator", success=True, duration_ms=10)
+            stats = await c.get_stats(since=0)  # 全部
+            assert stats["totals"]["calls"] == 1
+            stats_now = await c.get_stats(since=2 ** 31)  # 未来时间戳 -> 无记录
+            assert stats_now["totals"]["calls"] == 0
+            await c.reset()
+
+        asyncio.run(main())
 
 
 class TestAgentTaskDataset:

@@ -923,11 +923,11 @@ async def get_session_stream_events(
 
     from app.agent.event_stream import event_stream_store
 
-    events = event_stream_store.get_events(session_id, after_seq=after, limit=limit)
+    events = await event_stream_store.get_events(session_id, after_seq=after, limit=limit)
     return {
         "session_id": session_id,
         "after": after,
-        "next_seq": event_stream_store.next_seq(session_id),
+        "next_seq": await event_stream_store.next_seq(session_id),
         "events": events,
         "has_more": len(events) >= limit,
     }
@@ -982,7 +982,7 @@ async def approve_tool_call(approval_id: str, http_request: Request):
     try:
         from app.security.approval import approval_manager
 
-        success = approval_manager.decide(
+        success = await approval_manager.decide(
             approval_id, approve=True, by_user=user_id
         )
     except Exception as e:
@@ -1009,7 +1009,7 @@ async def reject_tool_call(approval_id: str, http_request: Request):
     try:
         from app.security.approval import approval_manager
 
-        success = approval_manager.decide(
+        success = await approval_manager.decide(
             approval_id, approve=False, by_user=user_id
         )
     except Exception as e:

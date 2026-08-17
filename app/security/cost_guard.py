@@ -64,12 +64,26 @@ class CostGuard:
 
     def __init__(self, config: Optional[CostGuardConfig] = None):
         self.config = config or _default_config()
-        self._usage: Dict[str, Dict[str, int]] = {}
+        # 告警标记保持进程内（仅影响日志频率，无需共享）
         self._warned: Dict[str, bool] = {}
         self._lock = threading.Lock()
+        # 用量计数走统一存储后端（memory / redis），支持多实例
+        self._backend = None
+
+    def _b(self):
+        """懒加载存储后端（避免 import 循环）。"""
+        if self._backend is None:
+            from app.storage.backend import get_storage_backend
+
+            self._backend = get_storage_backend()
+        return self._backend
+
+    @staticmethod
+    def _usage_key(session_id: str) -> str:
+        return f"cost:usage:{session_id}"
 
     # ------------------------------------------------------------------
-    def check(
+    async def check(
         self,
         session_id: str,
         estimated_turn_tokens: int = 0,
@@ -87,9 +101,12 @@ class CostGuard:
         if not self.config.enabled:
             return CostCheckResult(True, "ok", "cost guard disabled")
 
-        with self._lock:
-            used = self._usage.get(session_id, {"input": 0, "output": 0})
-            used_total = used["input"] + used["output"]
+        try:
+            used = await self._b().hgetall(self._usage_key(session_id))
+            used_total = int(used.get("input", 0)) + int(used.get("output", 0))
+        except Exception as e:
+            logger.debug("Cost guard backend read failed, allow: %s", e)
+            return CostCheckResult(True, "ok", "cost guard backend unavailable")
 
         budget = self.config.session_token_budget
         if budget <= 0:
@@ -131,34 +148,46 @@ class CostGuard:
 
         return CostCheckResult(True, "ok", "within budget", used_total, budget)
 
-    def record(self, session_id: str, input_tokens: int, output_tokens: int) -> None:
-        """调用后累计 token 用量。"""
+    async def record(self, session_id: str, input_tokens: int, output_tokens: int) -> None:
+        """调用后累计 token 用量（hash 自增）。"""
         if not self.config.enabled or not session_id:
             return
-        with self._lock:
-            used = self._usage.setdefault(session_id, {"input": 0, "output": 0})
-            used["input"] += int(input_tokens or 0)
-            used["output"] += int(output_tokens or 0)
+        try:
+            b = self._b()
+            key = self._usage_key(session_id)
+            if int(input_tokens or 0):
+                await b.hincrby(key, "input", int(input_tokens))
+            if int(output_tokens or 0):
+                await b.hincrby(key, "output", int(output_tokens))
+        except Exception as e:
+            logger.debug("Cost guard record failed: %s", e)
 
-    def get_usage(self, session_id: str) -> dict:
+    async def get_usage(self, session_id: str) -> dict:
         """查询会话累计用量。"""
-        with self._lock:
-            used = self._usage.get(session_id, {"input": 0, "output": 0})
-            return {
-                "input_tokens": used["input"],
-                "output_tokens": used["output"],
-                "total_tokens": used["input"] + used["output"],
-            }
+        try:
+            used = await self._b().hgetall(self._usage_key(session_id))
+        except Exception as e:
+            logger.debug("Cost guard usage read failed: %s", e)
+            used = {}
+        input_tokens = int(used.get("input", 0))
+        output_tokens = int(used.get("output", 0))
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        }
 
-    def reset(self, session_id: Optional[str] = None) -> None:
+    async def reset(self, session_id: Optional[str] = None) -> None:
         """重置计数（测试用；生产可做会话过期清理）。"""
-        with self._lock:
+        try:
+            b = self._b()
             if session_id:
-                self._usage.pop(session_id, None)
+                await b.delete(self._usage_key(session_id))
                 self._warned.pop(session_id, None)
             else:
-                self._usage.clear()
-                self._warned.clear()
+                await b.delete(self._usage_key(""))  # noop guard
+        except Exception as e:
+            logger.debug("Cost guard reset failed: %s", e)
 
 
 def _default_config() -> CostGuardConfig:

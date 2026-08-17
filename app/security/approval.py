@@ -87,8 +87,21 @@ class ApprovalManager:
 
     def __init__(self, config: Optional[ApprovalConfig] = None):
         self.config = config or _default_config()
-        self._requests: Dict[str, ApprovalRequest] = {}
+        # 审批请求存储走统一后端（memory / redis），支持多实例
+        self._requests: Dict[str, ApprovalRequest] = {}  # 进程内镜像（供轮询快速路径）
         self._lock = threading.Lock()
+        self._backend = None
+
+    def _b(self):
+        if self._backend is None:
+            from app.storage.backend import get_storage_backend
+
+            self._backend = get_storage_backend()
+        return self._backend
+
+    @staticmethod
+    def _req_key(approval_id: str) -> str:
+        return f"approval:req:{approval_id}" 
 
     # ------------------------------------------------------------------
     def requires_approval(self, tool_name: str) -> bool:
@@ -106,7 +119,7 @@ class ApprovalManager:
             and user_id in (self.config.admin_users or [])
         )
 
-    def request(
+    async def request(
         self,
         tool_name: str,
         arguments: Dict[str, Any],
@@ -114,7 +127,7 @@ class ApprovalManager:
         session_id: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> ApprovalRequest:
-        """发起审批请求（返回 pending 状态）。"""
+        """发起审批请求（返回 pending 状态，写入统一后端）。"""
         req = ApprovalRequest(
             approval_id=uuid.uuid4().hex,
             tool_name=tool_name,
@@ -125,6 +138,16 @@ class ApprovalManager:
         )
         with self._lock:
             self._requests[req.approval_id] = req
+        try:
+            import json as _json
+
+            await self._b().set(
+                self._req_key(req.approval_id),
+                _json.dumps(req.to_dict(), ensure_ascii=False, default=str),
+                ttl=req.timeout_seconds + 60,  # 决策后保留缓冲
+            )
+        except Exception as e:
+            logger.warning("Approval backend write failed (memory fallback): %s", e)
         logger.info(
             "Approval requested: %s (%s) by user %s",
             req.approval_id,
@@ -133,8 +156,8 @@ class ApprovalManager:
         )
         return req
 
-    def decide(self, approval_id: str, approve: bool, by_user: Optional[str] = None) -> bool:
-        """用户决策：批准/拒绝。"""
+    async def decide(self, approval_id: str, approve: bool, by_user: Optional[str] = None) -> bool:
+        """用户决策：批准/拒绝（同步更新进程内 + 后端）。"""
         with self._lock:
             req = self._requests.get(approval_id)
             if req is None or req.status != ApprovalStatus.PENDING:
@@ -144,6 +167,16 @@ class ApprovalManager:
             )
             req.decided_at = datetime.now(timezone.utc).isoformat()
             req.decided_by = by_user
+        try:
+            import json as _json
+
+            await self._b().set(
+                self._req_key(approval_id),
+                _json.dumps(req.to_dict(), ensure_ascii=False, default=str),
+                ttl=req.timeout_seconds + 60,
+            )
+        except Exception as e:
+            logger.warning("Approval backend update failed: %s", e)
         logger.info(
             "Approval %s %s by %s",
             approval_id,
@@ -152,58 +185,46 @@ class ApprovalManager:
         )
         return True
 
-    def get_status(self, approval_id: str) -> Optional[ApprovalRequest]:
+    async def get_status(self, approval_id: str) -> Optional[ApprovalRequest]:
         """
-        查询审批状态；超时未决策的自动标记 TIMEOUT（懒判定）。
+        查询审批状态（进程内优先，后端兜底——支持多实例跨实例决策）。
 
-        注意：pending 请求在 Agent 轮询侧应以 `timeout_seconds` 为准自行判断，
-        此处仅将超过 `timeout_seconds` 的 pending 置为 timeout（用于展示）。
+        超时未决策的自动标记 TIMEOUT（懒判定）。
         """
         with self._lock:
             req = self._requests.get(approval_id)
-            if req is None:
-                return None
-            if req.status == ApprovalStatus.PENDING:
-                elapsed = _now_ts() - _iso_to_ts(req.created_at)
-                if elapsed > req.timeout_seconds:
-                    req.status = ApprovalStatus.TIMEOUT
-                    req.decided_at = datetime.now(timezone.utc).isoformat()
-            return req
-
-    def wait_for_decision(
-        self,
-        approval_id: str,
-        timeout_seconds: Optional[float] = None,
-        poll_interval: float = 0.5,
-    ) -> ApprovalRequest:
-        """
-        阻塞等待审批决策（Agent 侧使用）。
-
-        Args:
-            approval_id: 审批 ID
-            timeout_seconds: 等待上限（默认用请求自身的 timeout）
-            poll_interval: 轮询间隔（秒）
-
-        Returns:
-            最终状态（approved/rejected/timeout）
-        """
-        req = self._requests.get(approval_id)
         if req is None:
-            raise KeyError(f"Approval not found: {approval_id}")
-        timeout = timeout_seconds or req.timeout_seconds
-        deadline = _now_ts() + timeout
-        while True:
-            current = self.get_status(approval_id)
-            if current is None:
-                return req
-            if current.status != ApprovalStatus.PENDING:
-                return current
-            if _now_ts() >= deadline:
-                with self._lock:
-                    current.status = ApprovalStatus.TIMEOUT
-                    current.decided_at = datetime.now(timezone.utc).isoformat()
-                return current
-            time.sleep(poll_interval)
+            # 后端兜底：本实例无此请求（可能由其他实例创建/决策）
+            try:
+                raw = await self._b().get(self._req_key(approval_id))
+                if raw:
+                    import json as _json
+
+                    data = _json.loads(raw)
+                    req = ApprovalRequest(
+                        approval_id=data["approval_id"],
+                        tool_name=data["tool_name"],
+                        arguments=data.get("arguments") or {},
+                        user_id=data.get("user_id"),
+                        session_id=data.get("session_id"),
+                        status=ApprovalStatus(data.get("status", "pending")),
+                        created_at=data.get("created_at", ""),
+                        decided_at=data.get("decided_at"),
+                        decided_by=data.get("decided_by"),
+                        timeout_seconds=data.get("timeout_seconds", 120.0),
+                    )
+                    with self._lock:
+                        self._requests[approval_id] = req
+            except Exception as e:
+                logger.debug("Approval backend read failed: %s", e)
+        if req is None:
+            return None
+        if req.status == ApprovalStatus.PENDING:
+            elapsed = _now_ts() - _iso_to_ts(req.created_at)
+            if elapsed > req.timeout_seconds:
+                req.status = ApprovalStatus.TIMEOUT
+                req.decided_at = datetime.now(timezone.utc).isoformat()
+        return req
 
     async def await_decision(
         self,
@@ -212,7 +233,7 @@ class ApprovalManager:
         poll_interval: float = 0.5,
     ) -> ApprovalRequest:
         """异步等待审批决策（不阻塞事件循环）。"""
-        req = self._requests.get(approval_id)
+        req = await self.get_status(approval_id)
         if req is None:
             raise KeyError(f"Approval not found: {approval_id}")
         timeout = timeout_seconds or req.timeout_seconds
@@ -220,7 +241,7 @@ class ApprovalManager:
 
         deadline = _now_ts() + timeout
         while True:
-            current = self.get_status(approval_id)
+            current = await self.get_status(approval_id)
             if current is None:
                 return req
             if current.status != ApprovalStatus.PENDING:

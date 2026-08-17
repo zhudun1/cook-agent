@@ -312,7 +312,7 @@ class LLMInvoker:
         # P0 安全: 成本熔断（调用前检查）
         # ==========================================================================
         session_id = self._session_id()
-        cost_check = self._cost_check(session_id)
+        cost_check = await self._cost_check(session_id)
         if not cost_check.allowed:
             from app.llm.resilience import LLMResilienceError
 
@@ -329,7 +329,7 @@ class LLMInvoker:
             response = await self._get_llm_with_model(tools=tools).ainvoke(
                 messages, **kwargs
             )
-            self._record_usage(session_id, response)
+            await self._record_usage(session_id, response)
             return response
 
         async def call(llm_type: str, model: str) -> Any:
@@ -343,7 +343,7 @@ class LLMInvoker:
             cfg,
             on_event=self._on_resilience_event,
         )
-        self._record_usage(session_id, response)
+        await self._record_usage(session_id, response)
         return response
 
     # ------------------------------------------------------------------
@@ -362,20 +362,20 @@ class LLMInvoker:
             pass
         return None
 
-    def _cost_check(self, session_id: Optional[str]):
+    async def _cost_check(self, session_id: Optional[str]):
         """成本熔断检查（未启用/无会话时放行）。"""
         try:
             from app.security.cost_guard import cost_guard
 
             if session_id:
-                return cost_guard.check(session_id)
+                return await cost_guard.check(session_id)
         except Exception:
             pass
         from app.security.cost_guard import CostCheckResult
 
         return CostCheckResult(True, "ok", "cost guard unavailable")
 
-    def _record_usage(self, session_id: Optional[str], response: Any) -> None:
+    async def _record_usage(self, session_id: Optional[str], response: Any) -> None:
         """调用后按 usage_metadata 记账。"""
         if not session_id:
             return
@@ -393,7 +393,7 @@ class LLMInvoker:
                 return
             from app.security.cost_guard import cost_guard
 
-            cost_guard.record(session_id, input_tokens or 0, output_tokens or 0)
+            await cost_guard.record(session_id, input_tokens or 0, output_tokens or 0)
         except Exception:
             pass
 
@@ -425,7 +425,7 @@ class LLMInvoker:
 
         # P0 安全: 成本熔断（流式调用前检查）
         session_id = self._session_id()
-        cost_check = self._cost_check(session_id)
+        cost_check = await self._cost_check(session_id)
         if not cost_check.allowed:
             raise LLMResilienceError(
                 f"Cost guard: {cost_check.reason}",

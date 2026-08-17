@@ -75,7 +75,9 @@ class AgentHub:
     _providers: dict[str, ToolProvider] = {}
     # P3 多租户隔离：会话级有状态工具实例缓存
     # key = (session_id, tool_name)，仅缓存 is_stateful 工具的克隆实例
+    # 进程内缓存（工具实例含连接，跨进程共享无意义）；大小上限防泄漏
     _session_tools: dict[tuple[str, str], "BaseTool"] = {}
+    _session_tools_max: int = 2000
 
     # ==================== Agent ====================
 
@@ -169,6 +171,13 @@ class AgentHub:
         if tool is None:
             return None
         if getattr(tool, "is_stateful", False):
+            # 上限治理：超限时清理最旧的会话实例（LRU 近似，dict 保序）
+            if len(cls._session_tools) >= cls._session_tools_max:
+                try:
+                    oldest = next(iter(cls._session_tools))
+                    cls._session_tools.pop(oldest, None)
+                except StopIteration:
+                    pass
             cloned = tool.clone_for_session(user_id=user_id, session_id=session_id)
             cls._session_tools[key] = cloned
             return cloned

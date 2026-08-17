@@ -189,10 +189,12 @@ class AgentService:
             # P3 断点恢复：事件流存储（前端重连回放）
             from app.agent.event_stream import event_stream_store
 
-            def emit(event_type: str, data: dict) -> str:
+            async def emit(event_type: str, data: dict) -> str:
                 # P3 断点恢复：事件附带递增序号（前端断点标记）
                 event_copy = dict(data)
-                seq = event_stream_store.append(actual_session_id, self._format_event(event_type, data))
+                seq = await event_stream_store.append(
+                    actual_session_id, self._format_event(event_type, data)
+                )
                 event_copy["_seq"] = seq
                 return self._format_event(event_type, event_copy)
 
@@ -205,7 +207,7 @@ class AgentService:
             )
 
             # 2. 发送 session 信息
-            yield emit(
+            yield await emit(
                 "session",
                 {
                     "session_id": actual_session_id,
@@ -252,7 +254,7 @@ class AgentService:
                             "error": None,
                         }
                     )
-                    yield emit("vision", vision_result)
+                    yield await emit("vision", vision_result)
 
             # 5. 获取 Agent
             agent = self._get_agent_or_fallback(agent_name)
@@ -279,7 +281,7 @@ class AgentService:
                     if thinking_end_time is None:
                         thinking_end_time = time.time()
                     response_content += chunk.data
-                    yield emit(
+                    yield await emit(
                         "text",
                         {
                             "content": chunk.data,
@@ -336,7 +338,7 @@ class AgentService:
                             ],
                         }
                     )
-                    yield emit(
+                    yield await emit(
                         "tool_call",
                         {
                             "id": tool_call.id,
@@ -402,7 +404,7 @@ class AgentService:
                             ],
                         }
                     )
-                    yield emit(
+                    yield await emit(
                         "tool_result",
                         {
                             "name": result.name,
@@ -416,12 +418,12 @@ class AgentService:
                 elif chunk.type == AgentChunkType.TRACE:
                     trace_step = chunk.data
                     trace_steps.append(asdict(trace_step))
-                    yield emit("trace", asdict(trace_step))
+                    yield await emit("trace", asdict(trace_step))
 
                 elif chunk.type == AgentChunkType.APPROVAL:
                     # P0 安全: HITL 审批请求 -> 转发 SSE（前端展示审批卡片）
                     approval = chunk.data
-                    yield emit(
+                    yield await emit(
                         "approval_requested",
                         {
                             "approval_id": approval.get("approval_id"),
@@ -438,7 +440,7 @@ class AgentService:
                     )
 
                 elif chunk.type == AgentChunkType.ERROR:
-                    yield emit("error", chunk.data)
+                    yield await emit("error", chunk.data)
 
                 elif chunk.type == AgentChunkType.DONE:
                     # Track answer end time
@@ -465,7 +467,7 @@ class AgentService:
                             (answer_end_time - thinking_start_time) * 1000
                         )
 
-                    yield emit(
+                    yield await emit(
                         "done",
                         {
                             "session_id": actual_session_id,
@@ -625,7 +627,7 @@ class AgentService:
                 recorder.save()
             # actual_session_id 可能尚未赋值（异常发生在会话创建前）
             if "actual_session_id" in dir() and "emit" in dir():
-                yield emit("error", {"error": str(e)})
+                yield await emit("error", {"error": str(e)})
             else:
                 yield self._format_event("error", {"error": str(e)})
         finally:

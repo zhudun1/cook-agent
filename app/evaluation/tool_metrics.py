@@ -8,40 +8,47 @@
 - 错误码分布（error_code）
 
 接入点：ToolExecutor.execute（每次调用前后计时与记录）。
-聚合为进程内内存窗口（默认保留最近 1000 条），提供查询接口。
+数据面走统一存储后端（memory / redis），支持多实例聚合。
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import statistics
-import threading
 import time
-from collections import defaultdict, deque
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+_RECORDS_KEY = "toolmetrics:records"
 
 
 class ToolMetricsCollector:
     """
-    工具调用指标采集器（滑动窗口）。
+    工具调用指标采集器（滑动窗口 + 统一存储后端）。
 
     用法::
 
         collector = ToolMetricsCollector()
-        collector.record("web_search", success=True, duration_ms=120)
-        collector.record("web_search", success=False, error_code="TIMEOUT", duration_ms=30000)
-        stats = collector.get_stats()  # 按工具聚合
+        await collector.record("web_search", success=True, duration_ms=120)
+        await collector.record("web_search", success=False, error_code="TIMEOUT", duration_ms=30000)
+        stats = await collector.get_stats()  # 按工具聚合
     """
 
     def __init__(self, max_records: int = 1000):
         self.max_records = max_records
-        self._records: Deque[Dict[str, Any]] = deque(maxlen=max_records)
-        self._lock = threading.Lock()
+        self._backend = None
+
+    def _b(self):
+        if self._backend is None:
+            from app.storage.backend import get_storage_backend
+
+            self._backend = get_storage_backend()
+        return self._backend
 
     # ------------------------------------------------------------------
-    def record(
+    async def record(
         self,
         tool_name: str,
         success: bool,
@@ -50,22 +57,31 @@ class ToolMetricsCollector:
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> None:
-        """记录一次工具调用。"""
-        with self._lock:
-            self._records.append(
-                {
-                    "tool": tool_name,
-                    "success": bool(success),
-                    "duration_ms": round(float(duration_ms), 2),
-                    "error_code": error_code,
-                    "user_id": user_id,
-                    "session_id": session_id,
-                    "timestamp": time.time(),
-                }
-            )
+        """记录一次工具调用（追加到滑动窗口）。"""
+        item = json.dumps(
+            {
+                "tool": tool_name,
+                "success": bool(success),
+                "duration_ms": round(float(duration_ms), 2),
+                "error_code": error_code,
+                "user_id": user_id,
+                "session_id": session_id,
+                "timestamp": time.time(),
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        try:
+            b = self._b()
+            await b.rpush(_RECORDS_KEY, item)
+            length = await b.llen(_RECORDS_KEY)
+            if length > self.max_records:
+                await b.ltrim(_RECORDS_KEY, length - self.max_records, -1)
+        except Exception as e:
+            logger.debug("Tool metrics record failed: %s", e)
 
     # ------------------------------------------------------------------
-    def get_stats(
+    async def get_stats(
         self,
         tool_name: Optional[str] = None,
         since: Optional[float] = None,
@@ -80,18 +96,29 @@ class ToolMetricsCollector:
         Returns:
             {tools: {tool_name: {...}}, totals: {...}}
         """
-        with self._lock:
-            records = list(self._records)
-        if since is not None:
-            records = [r for r in records if r["timestamp"] >= since]
-        if tool_name:
-            records = [r for r in records if r["tool"] == tool_name]
+        try:
+            raw = await self._b().lrange(_RECORDS_KEY, 0, -1)
+        except Exception as e:
+            logger.debug("Tool metrics read failed: %s", e)
+            raw = []
 
-        by_tool: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        records: List[Dict[str, Any]] = []
+        for item in raw:
+            try:
+                r = json.loads(item)
+            except Exception:
+                continue
+            if since is not None and r.get("timestamp", 0) < since:
+                continue
+            if tool_name and r.get("tool") != tool_name:
+                continue
+            records.append(r)
+
+        by_tool: Dict[str, List[Dict[str, Any]]] = {}
         for r in records:
-            by_tool[r["tool"]].append(r)
+            by_tool.setdefault(r["tool"], []).append(r)
 
-        stats = {"tools": {}, "totals": {}}
+        stats: Dict[str, Any] = {"tools": {}, "totals": {}}
         for tool, items in by_tool.items():
             stats["tools"][tool] = self._aggregate(items)
         stats["totals"] = self._aggregate(records)
@@ -110,10 +137,11 @@ class ToolMetricsCollector:
         durations = [r["duration_ms"] for r in records]
         durations_sorted = sorted(durations)
         success = sum(1 for r in records if r["success"])
-        error_codes: Dict[str, int] = defaultdict(int)
+        error_codes: Dict[str, int] = {}
         for r in records:
             if not r["success"]:
-                error_codes[r["error_code"] or "UNKNOWN"] += 1
+                code = r.get("error_code") or "UNKNOWN"
+                error_codes[code] = error_codes.get(code, 0) + 1
 
         def percentile(p: float) -> Optional[float]:
             if not durations_sorted:
@@ -127,12 +155,14 @@ class ToolMetricsCollector:
             "avg_duration_ms": round(statistics.mean(durations), 2),
             "p50_ms": percentile(0.5),
             "p95_ms": percentile(0.95),
-            "error_codes": dict(error_codes),
+            "error_codes": error_codes,
         }
 
-    def reset(self) -> None:
-        with self._lock:
-            self._records.clear()
+    async def reset(self) -> None:
+        try:
+            await self._b().delete(_RECORDS_KEY)
+        except Exception as e:
+            logger.debug("Tool metrics reset failed: %s", e)
 
 
 # 全局单例

@@ -279,7 +279,7 @@ async def get_tool_metrics(
 
         since = _time.time() - minutes * 60
 
-    stats = tool_metrics.get_stats(tool_name=tool, since=since)
+    stats = await tool_metrics.get_stats(tool_name=tool, since=since)
     return {
         "window_minutes": minutes,
         "tool": tool,

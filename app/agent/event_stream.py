@@ -5,44 +5,66 @@
 P3 断点恢复：把 Agent 执行的 SSE 事件按会话顺序缓存，
 前端断线重连后通过 `after_seq` 拉取缺失事件回放。
 
-- 进程内滑动窗口（每会话保留最近 N 条，防止内存膨胀）
+- 统一存储后端（memory / redis），支撑多实例部署
 - 事件带全局递增序号（seq），支持增量拉取
-- 会话结束/超时清理
-
-生产多实例部署时应替换为 Redis 流（接口已隔离）。
+- 滑动窗口（每会话保留最近 N 条）+ TTL 自动过期
 """
 
 from __future__ import annotations
 
 import logging
-import threading
-import time
-from collections import deque
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class EventStreamStore:
-    """会话事件流缓存。"""
+    """会话事件流缓存（统一存储后端：memory / redis）。"""
 
-    def __init__(self, max_events_per_session: int = 500):
+    def __init__(
+        self,
+        max_events_per_session: int = 500,
+        ttl_seconds: float = 3600.0,
+    ):
         self.max_events_per_session = max_events_per_session
-        self._streams: Dict[str, Deque[Tuple[int, str]]] = {}
-        self._next_seq: Dict[str, int] = {}
-        self._lock = threading.Lock()
+        self.ttl_seconds = ttl_seconds
+        self._backend = None
+
+    def _b(self):
+        if self._backend is None:
+            from app.storage.backend import get_storage_backend
+
+            self._backend = get_storage_backend()
+        return self._backend
+
+    @staticmethod
+    def _stream_key(session_id: str) -> str:
+        return f"event:stream:{session_id}"
+
+    @staticmethod
+    def _meta_key(session_id: str) -> str:
+        return f"event:meta:{session_id}"
 
     # ------------------------------------------------------------------
-    def append(self, session_id: str, event: str) -> int:
-        """追加一条事件，返回其序号。"""
-        with self._lock:
-            seq = self._next_seq.get(session_id, 0)
-            stream = self._streams.setdefault(session_id, deque(maxlen=self.max_events_per_session))
-            stream.append((seq, event))
-            self._next_seq[session_id] = seq + 1
-            return seq
+    async def append(self, session_id: str, event: str) -> int:
+        """追加一条事件，返回其序号（list + seq 元数据）。"""
+        import json as _json
 
-    def get_events(
+        b = self._b()
+        stream_key = self._stream_key(session_id)
+        meta_key = self._meta_key(session_id)
+        seq = await b.hincrby(meta_key, "seq", 1) - 1
+        await b.rpush(stream_key, _json.dumps([seq, event], ensure_ascii=False))
+        # 滑动窗口裁剪
+        length = await b.llen(stream_key)
+        if length > self.max_events_per_session:
+            await b.ltrim(stream_key, length - self.max_events_per_session, -1)
+        if self.ttl_seconds > 0:
+            await b.expire(stream_key, self.ttl_seconds)
+            await b.expire(meta_key, self.ttl_seconds)
+        return seq
+
+    async def get_events(
         self,
         session_id: str,
         after_seq: int = -1,
@@ -57,39 +79,47 @@ class EventStreamStore:
             limit: 最大返回条数
 
         Returns:
-            [{"seq": n, "event": "..."}]
+            [{"seq": seq, "event": "..."}]
         """
-        with self._lock:
-            stream = self._streams.get(session_id)
-            if not stream:
-                return []
-            events = [
-                {"seq": seq, "event": ev}
-                for seq, ev in stream
-                if seq > after_seq
-            ]
+        import json as _json
+
+        try:
+            raw = await self._b().lrange(self._stream_key(session_id), 0, -1)
+        except Exception as e:
+            logger.debug("Event stream read failed: %s", e)
+            return []
+        events = []
+        for item in raw:
+            try:
+                seq, ev = _json.loads(item)
+            except Exception:
+                continue
+            if seq > after_seq:
+                events.append({"seq": seq, "event": ev})
         return events[-limit:]
 
-    def next_seq(self, session_id: str) -> int:
+    async def next_seq(self, session_id: str) -> int:
         """会话当前最大序号（用于断点标记）。"""
-        with self._lock:
-            return self._next_seq.get(session_id, 0)
+        try:
+            raw = await self._b().hgetall(self._meta_key(session_id))
+            return int(raw.get("seq", 0))
+        except Exception:
+            return 0
 
-    def has_stream(self, session_id: str) -> bool:
-        with self._lock:
-            return session_id in self._streams
+    async def has_stream(self, session_id: str) -> bool:
+        try:
+            return await self._b().exists(self._stream_key(session_id))
+        except Exception:
+            return False
 
-    def clear(self, session_id: str) -> None:
+    async def clear(self, session_id: str) -> None:
         """清理会话流。"""
-        with self._lock:
-            self._streams.pop(session_id, None)
-            self._next_seq.pop(session_id, None)
-
-    def clear_expired(self, ttl_seconds: float = 3600) -> int:
-        """清理超过 TTL 的会话流（惰性治理）。"""
-        now = time.time()
-        # 简化：依赖 deque 长度上限；TTL 治理留给分布式实现
-        return 0
+        try:
+            b = self._b()
+            await b.delete(self._stream_key(session_id))
+            await b.delete(self._meta_key(session_id))
+        except Exception as e:
+            logger.debug("Event stream clear failed: %s", e)
 
 
 # 全局单例

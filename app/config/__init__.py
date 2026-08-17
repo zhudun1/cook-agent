@@ -66,6 +66,7 @@ from app.config.telemetry_config import (
     TrajectoryConfig,
 )
 from app.config.memory_config import MemoryConfig
+from app.config.storage_config import StorageConfig
 from app.config.security_config import (
     SecurityConfig,
     CostGuardConfig,
@@ -123,6 +124,7 @@ __all__ = [
     "PermissionConfig",
     "InjectionGuardConfig",
     "MemoryConfig",
+    "StorageConfig",
     # Image generation/storage configuration
     "ImageGenerationConfig",
     "ImageStorageConfig",

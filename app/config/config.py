@@ -28,6 +28,7 @@ from app.config.resilience_config import ResilienceConfig
 from app.config.telemetry_config import TelemetryConfig
 from app.config.security_config import SecurityConfig
 from app.config.memory_config import MemoryConfig
+from app.config.storage_config import StorageConfig
 from app.config.config_loader import (
     load_database_config,
     load_llm_config,
@@ -43,6 +44,7 @@ from app.config.config_loader import (
     load_telemetry_config,
     load_security_config,
     load_memory_config,
+    load_storage_config,
 )
 
 
@@ -140,6 +142,9 @@ class Settings(BaseModel):
 
     # P2 Long-term memory configuration
     memory: MemoryConfig = load_memory_config()
+
+    # Storage backend configuration (memory / redis)
+    storage: StorageConfig = load_storage_config()
 
     class Config:
         arbitrary_types_allowed = True

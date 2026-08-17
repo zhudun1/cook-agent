@@ -132,6 +132,14 @@ async def lifespan(app: FastAPI):
     await close_db()
     logger.info("Database connections closed.")
 
+    # 关闭存储后端（Redis 连接等）
+    try:
+        from app.storage.backend import get_storage_backend
+
+        await get_storage_backend().close()
+    except Exception as e:
+        logger.warning("Storage backend close skipped: %s", e)
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

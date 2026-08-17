@@ -339,7 +339,7 @@ class ToolExecutor:
         try:
             from app.evaluation.tool_metrics import tool_metrics
 
-            tool_metrics.record(
+            await tool_metrics.record(
                 tool_name=tool_name,
                 success=result.success,
                 duration_ms=duration_ms,
@@ -410,7 +410,7 @@ class ToolExecutor:
                         )
                     else:
                         pre_args = tool.parse_arguments(arguments) or {}
-                        req = approval_manager.request(
+                        req = await approval_manager.request(
                             tool_name,
                             dict(pre_args),
                             user_id=self.user_id,

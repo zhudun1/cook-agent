@@ -527,3 +527,20 @@ prompt_registry:
   #     weight: 0.2
   #     description: "实验版（更简洁）"
   #     content: "你是 CookHero 饮食助手，回答简洁直接。"
+
+# =============================================================================
+# 20. Storage Backend（数据面统一存储）
+# =============================================================================
+# memory: 进程内（单机/默认）；redis: 生产多实例共享状态
+# =============================================================================
+
+storage:
+  # backend: "memory" 或 "redis"（redis 时默认复用 database.redis 连接）
+  backend: "memory"
+  # Redis 覆盖（不填则复用 database.redis）
+  # redis_host: "localhost"
+  # redis_port: 6379
+  # 事件流默认 TTL（秒），超过自动过期
+  event_stream_ttl_seconds: 3600
+  # 工具 SLO 记录窗口上限
+  tool_metrics_max_records: 1000

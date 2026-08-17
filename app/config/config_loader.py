@@ -36,6 +36,7 @@ from app.config.resilience_config import ResilienceConfig
 from app.config.telemetry_config import TelemetryConfig
 from app.config.security_config import SecurityConfig
 from app.config.memory_config import MemoryConfig
+from app.config.storage_config import StorageConfig
 
 
 # Load .env file into environment variables at module import
@@ -371,3 +372,14 @@ def load_memory_config() -> MemoryConfig:
     config_data = _load_config_data()
     data = dict(config_data.get("memory", {}) or {})
     return MemoryConfig.model_validate(data)
+
+
+def load_storage_config() -> StorageConfig:
+    """
+    Load storage backend configuration from YAML.
+
+    Section: storage
+    """
+    config_data = _load_config_data()
+    data = dict(config_data.get("storage", {}) or {})
+    return StorageConfig.model_validate(data)
