@@ -14,7 +14,7 @@
 # =============================================================================
 name: CI
 
-on:
+"on":
   push:
     branches: [main]
   pull_request:
@@ -52,7 +52,7 @@ jobs:
       # 评测回归门禁：仅在配置了 LLM_API_KEY secret 时启用。
       # 首次运行自动生成基线；后续运行对比基线，完成率下降超阈值即失败。
       - name: Task evaluation regression gate
-        if: ${{ secrets.LLM_API_KEY != '' }}
+        if: env.LLM_API_KEY != ''
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: |
