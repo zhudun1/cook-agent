@@ -452,4 +452,14 @@ class OfflineEvaluationRunner:
 
 
 # 单例
-offline_evaluation_runner = OfflineEvaluationRunner()
+# 惰性单例：避免模块导入时实例化（拉入 rag_service -> openai client 依赖链，
+# 在无 API key 的 CI/环境会直接崩溃）
+_offline_runner_instance: Optional[OfflineEvaluationRunner] = None
+
+
+def get_offline_evaluation_runner() -> "OfflineEvaluationRunner":
+    """获取 OfflineEvaluationRunner 单例（惰性创建）。"""
+    global _offline_runner_instance
+    if _offline_runner_instance is None:
+        _offline_runner_instance = OfflineEvaluationRunner()
+    return _offline_runner_instance
